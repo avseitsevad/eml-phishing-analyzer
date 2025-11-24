@@ -1,0 +1,6 @@
+notebook.ipynb
+context.txt
+data/raw/enron/emails.csv
+data/processed/enron_raw.csv
+data/processed/nazario_raw.csv
+data/processed/dataset_example.csv

@@ -1,0 +1,48 @@
+2025-11-24 11:02:34,646 - email_parser - DEBUG - Email successfully parsed, found 6 headers
+2025-11-24 11:02:34,646 - email_parser - DEBUG - parse_eml executed in 0.2339 sec
+2025-11-24 11:02:34,646 - email_parser - DEBUG - Extracted 6 headers
+2025-11-24 11:02:34,661 - email_parser - DEBUG - Extracted body: text=7274 chars, html=0 chars
+2025-11-24 11:02:34,661 - email_parser - DEBUG - Extracted body: text=7274 chars, html=0 chars
+2025-11-24 11:02:34,834 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:02:34,834 - email_parser - DEBUG - Extracted body: text=7274 chars, html=0 chars
+2025-11-24 11:02:35,005 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:02:35,020 - email_parser - DEBUG - Extracted 6 headers
+2025-11-24 11:02:35,020 - email_parser - DEBUG - Extracted domains: 2, IPs: 0, email domains: 2
+2025-11-24 11:02:35,020 - email_parser - INFO - Email successfully parsed: headers=6, URLs=0, domains=2
+2025-11-24 11:02:35,518 - email_parser - DEBUG - Email successfully parsed, found 6 headers
+2025-11-24 11:02:35,518 - email_parser - DEBUG - parse_eml executed in 0.2024 sec
+2025-11-24 11:02:35,534 - email_parser - DEBUG - Extracted 6 headers
+2025-11-24 11:02:35,534 - email_parser - DEBUG - Extracted body: text=7274 chars, html=0 chars
+2025-11-24 11:02:35,534 - email_parser - DEBUG - Extracted body: text=7274 chars, html=0 chars
+2025-11-24 11:02:35,712 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:02:35,712 - email_parser - DEBUG - Extracted body: text=7274 chars, html=0 chars
+2025-11-24 11:02:35,863 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:02:35,863 - email_parser - DEBUG - Extracted 6 headers
+2025-11-24 11:02:35,878 - email_parser - DEBUG - Extracted domains: 2, IPs: 0, email domains: 2
+2025-11-24 11:02:35,878 - email_parser - INFO - Email successfully parsed: headers=6, URLs=0, domains=2
+2025-11-24 11:02:36,080 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 11:02:36,097 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 11:02:36,121 - email_parser - DEBUG - parse_eml executed in 0.2430 sec
+2025-11-24 11:02:36,121 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 11:02:36,128 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 11:02:36,128 - email_parser - DEBUG - Extracted metadata for 1 attachments
+2025-11-24 11:02:36,128 - email_parser - DEBUG - Computed 1 SHA-256 hashes for attachments
+2025-11-24 11:02:36,128 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 11:02:36,144 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:02:36,144 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 11:02:36,160 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:02:36,160 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 11:02:36,175 - email_parser - DEBUG - Extracted domains: 3, IPs: 1, email domains: 2
+2025-11-24 11:02:36,175 - email_parser - INFO - Email successfully parsed: headers=11, URLs=0, domains=3
+2025-11-24 11:02:36,315 - charset_normalizer - DEBUG - Encoding detection: ascii is most likely the one.
+2025-11-24 11:02:36,331 - email_parser - DEBUG - Email successfully parsed, found 6 headers
+2025-11-24 11:02:36,331 - email_parser - DEBUG - parse_eml executed in 0.1555 sec
+2025-11-24 11:02:36,331 - email_parser - DEBUG - Extracted 6 headers
+2025-11-24 11:02:36,331 - email_parser - DEBUG - Extracted body: text=19 chars, html=0 chars
+2025-11-24 11:02:36,347 - email_parser - DEBUG - Extracted body: text=19 chars, html=0 chars
+2025-11-24 11:02:36,347 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:02:36,347 - email_parser - DEBUG - Extracted body: text=19 chars, html=0 chars
+2025-11-24 11:02:36,362 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:02:36,362 - email_parser - DEBUG - Extracted 6 headers
+2025-11-24 11:02:36,362 - email_parser - DEBUG - Extracted domains: 1, IPs: 0, email domains: 1
+2025-11-24 11:02:36,362 - email_parser - INFO - Email successfully parsed: headers=6, URLs=0, domains=1
