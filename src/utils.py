@@ -87,6 +87,57 @@ def setup_logging(
     logging.getLogger('urllib3').setLevel(logging.WARNING)
     logging.getLogger('requests').setLevel(logging.WARNING)
 
+# Добавить в src/utils.py
+
+import re
+from urllib.parse import urlparse
+from typing import Optional, Tuple
+import tldextract
+
+def extract_hostname_from_url(url: str) -> Tuple[Optional[str], bool]:
+    """
+    Извлекает hostname из URL и определяет, является ли он IP-адресом
+    
+    Args:
+        url: URL для парсинга
+    
+    Returns:
+        tuple: (hostname, is_ip) где is_ip=True если hostname это IP-адрес
+    """
+    ip_pattern = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+    
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.netloc or (parsed.path.split('/')[0] if parsed.path else None)
+        
+        if not hostname:
+            return None, False
+        
+        # Удаляем порт
+        hostname = hostname.rsplit(':', 1)[0] if ':' in hostname else hostname
+        
+        # Проверяем, является ли IP-адресом
+        is_ip = bool(ip_pattern.match(hostname))
+        return hostname, is_ip
+    except Exception:
+        return None, False
+
+def normalize_domain(hostname: str) -> Optional[str]:
+    """
+    Нормализует домен используя tldextract
+    
+    Args:
+        hostname: hostname для нормализации
+    
+    Returns:
+        str: нормализованный домен (domain.suffix) или None
+    """
+    try:
+        extracted = tldextract.extract(hostname)
+        normalized = f"{extracted.domain}.{extracted.suffix}".lower()
+        return normalized if normalized and normalized != '.' else None
+    except Exception:
+        return None
 
 def validate_eml_format(email_content: Union[str, bytes]) -> bool:
     """
@@ -104,6 +155,10 @@ def validate_eml_format(email_content: Union[str, bytes]) -> bool:
             email_content = decode_text(email_content)
         
         if not email_content or not email_content.strip():
+            return False
+        
+        # Проверка минимальной длины
+        if len(email_content) <= 50:
             return False
         
         # Базовые проверки RFC 5322
@@ -279,6 +334,19 @@ def save_results(results: dict, output_path: Union[str, Path]) -> None:
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
+
+# Общие константы для проекта
+DANGEROUS_EXTENSIONS = {
+    '.exe', '.scr', '.bat', '.cmd', '.com', '.pif', '.vbs', '.js',
+    '.jar', '.app', '.deb', '.pkg', '.dmg', '.msi', '.dll', '.lnk',
+    '.hta', '.wsf', '.ps1', '.sh', '.run', '.bin'
+}
+
+URL_SHORTENERS = {
+    'bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly', 
+    'cutt.ly', 'rb.gy', 'j.mp', 'tiny.cc', 'short.link',
+    'is.gd', 'buff.ly', 'rebrand.ly', 'bitly.com'
+}
 
 # Инициализация логирования при импорте модуля (опционально)
 # Можно вызвать setup_logging() явно в главном модуле

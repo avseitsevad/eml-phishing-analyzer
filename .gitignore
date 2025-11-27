@@ -4,3 +4,7 @@ data/raw/enron/emails.csv
 data/processed/enron_raw.csv
 data/processed/nazario_raw.csv
 data/processed/dataset_example.csv
+data/threat_intelligence/ti_test_real_feeds.db
+notebooks/email_parsing.log
+notebooks/TI_testing.ipynb
+notebooks/parsing_testing.ipynb

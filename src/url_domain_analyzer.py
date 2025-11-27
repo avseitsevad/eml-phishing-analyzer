@@ -16,31 +16,22 @@ from typing import Dict, List, Optional, Tuple, Any
 import tldextract
 from urllib.parse import urlparse
 
-from .utils import timing_decorator
+from .utils import timing_decorator, URL_SHORTENERS
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
 
-# Списки TLD по категориям
-TLD_BLACKLIST = {
-    '.xin', '.win', '.help', '.bond', '.cfd', '.finance'
+# Список подозрительных TLD
+SUSPICIOUS_TLDS = {
+    '.xin', '.win', '.help', '.bond', '.cfd', '.finance',
+    '.top', '.xyz', '.icu', '.support', '.vip', '.pro', '.sbs',
+    '.site', '.online', '.click', '.tk', '.ml', '.ga', '.cf',
+    '.gq', '.club', '.work'
 }
 
-TLD_GRAYLIST = {
-    '.top', '.xyz', '.icu', '.support', '.vip', '.pro', '.sbs', 
-    '.site', '.online', '.click'
-}
+LONG_DOMAIN_THRESHOLD = 20
 
-TLD_WHITELIST = {
-    '.com', '.org', '.net', '.edu', '.gov', '.ru', '.рф'
-}
-
-# Список URL shorteners
-URL_SHORTENERS = {
-    'bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly', 
-    'cutt.ly', 'rb.gy', 'j.mp', 'tiny.cc', 'short.link',
-    'is.gd', 'buff.ly', 'rebrand.ly', 'bitly.com'
-}
+SHORTENER_DOMAINS = set(URL_SHORTENERS)
 
 def is_private_ip(ip: str) -> bool:
     """
@@ -68,86 +59,6 @@ def is_private_ip(ip: str) -> bool:
         return False
     except (ValueError, IndexError):
         return False
-
-
-def analyze_domain_length(domain: str) -> Tuple[float, Dict[str, Any]]:
-    """
-    Эвристический анализ домена: проверка длины.
-    
-    Правило: Домен длиннее 30 символов — подозрительный
-    
-    Args:
-        domain: Доменное имя
-        
-    Returns:
-        tuple: (вес, детали)
-    """
-    domain_length = len(domain)
-    details = {
-        'length': domain_length,
-        'rule': 'domain_length'
-    }
-    
-    if domain_length < 25:
-        weight = 0.0
-        details['level'] = 'normal'
-    elif domain_length < 30:
-        weight = 0.3
-        details['level'] = 'moderate'
-    elif domain_length < 40:
-        weight = 0.7
-        details['level'] = 'suspicious'
-    else:
-        weight = 1.0
-        details['level'] = 'very_suspicious'
-    
-    return weight, details
-
-
-def analyze_domain_tld(domain: str) -> Tuple[float, Dict[str, Any]]:
-    """
-    Эвристический анализ домена: проверка TLD.
-    
-    Правило: Проверка подозрительных доменных зон
-    
-    Args:
-        domain: Доменное имя
-        
-    Returns:
-        tuple: (вес, детали)
-    """
-    try:
-        extracted = tldextract.extract(domain)
-        tld = f".{extracted.suffix}" if extracted.suffix else ""
-    except Exception:
-        # Fallback: извлечение TLD вручную
-        parts = domain.split('.')
-        tld = f".{parts[-1]}" if len(parts) > 1 else ""
-    
-    details = {
-        'tld': tld,
-        'rule': 'domain_tld'
-    }
-    
-    if tld.lower() in TLD_BLACKLIST:
-        weight = 1.0
-        details['level'] = 'blacklisted'
-        details['category'] = 'blacklist'
-    elif tld.lower() in TLD_GRAYLIST:
-        weight = 0.5
-        details['level'] = 'graylisted'
-        details['category'] = 'graylist'
-    elif tld.lower() in TLD_WHITELIST:
-        weight = 0.0
-        details['level'] = 'whitelisted'
-        details['category'] = 'whitelist'
-    else:
-        # Неизвестный TLD - умеренно подозрительно
-        weight = 0.3
-        details['level'] = 'unknown'
-        details['category'] = 'unknown'
-    
-    return weight, details
 
 
 def detect_ip_in_url(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
@@ -221,7 +132,7 @@ def detect_url_shorteners(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]
             domain = domain.split(':')[0]
         
         # Проверка на точное совпадение или поддомен
-        for shortener in URL_SHORTENERS:
+        for shortener in SHORTENER_DOMAINS:
             if domain == shortener or domain.endswith(f'.{shortener}'):
                 return True, shortener, {
                     'rule': 'url_shortener',
@@ -243,197 +154,100 @@ def detect_url_shorteners(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]
         }
 
 
-def analyze_domain_features(domain: str) -> Dict[str, Any]:
+def is_long_domain(domain: str) -> bool:
     """
-    Комплексный эвристический анализ домена.
-    
-    Объединяет правила анализа домена:
-    - Длина домена
-    - Подозрительные TLD
-    
-    Args:
-        domain: Доменное имя
-        
-    Returns:
-        dict: Словарь с результатами анализа и максимальным весом
+    Проверяет, превышает ли домен порог длины.
     """
-    results = {
-        'domain': domain,
-        'rules': {},
-        'max_weight': 0.0,
-        'total_weight': 0.0
-    }
-    
-    # Анализ длины
-    length_weight, length_details = analyze_domain_length(domain)
-    results['rules']['length'] = {
-        'weight': length_weight,
-        **length_details
-    }
-    results['max_weight'] = max(results['max_weight'], length_weight)
-    results['total_weight'] += length_weight
-    
-    # Анализ TLD
-    tld_weight, tld_details = analyze_domain_tld(domain)
-    results['rules']['tld'] = {
-        'weight': tld_weight,
-        **tld_details
-    }
-    results['max_weight'] = max(results['max_weight'], tld_weight)
-    results['total_weight'] += tld_weight
-    
-    return results
+    return len(domain) > LONG_DOMAIN_THRESHOLD
 
 
-def analyze_urls(urls: List[str]) -> Dict[str, Any]:
+def is_suspicious_tld(domain: str) -> bool:
     """
-    Анализ списка URL по эвристическим правилам.
-    
-    Args:
-        urls: Список URL-адресов
-        
-    Returns:
-        dict: Результаты анализа URL
+    Проверяет TLD на вхождение в расширенный список подозрительных зон.
     """
-    results = {
-        'urls': urls,
-        'url_analyses': [],
-        'ip_detections': [],
-        'shortener_detections': [],
-        'max_weight': 0.0
-    }
-    
+    try:
+        extracted = tldextract.extract(domain)
+        tld = f".{extracted.suffix}" if extracted.suffix else ""
+    except Exception:
+        parts = domain.split('.')
+        tld = f".{parts[-1]}" if len(parts) > 1 else ""
+    return tld.lower() in SUSPICIOUS_TLDS
+
+
+def has_ip_based_url(urls: List[str]) -> bool:
+    """
+    Проверяет, содержит ли список URL адреса с IP вместо доменного имени.
+    """
     for url in urls:
-        url_analysis = {
-            'url': url,
-            'rules': {},
-            'max_weight': 0.0
-        }
-        
-        # Проверка IP в URL
-        has_ip, ip, ip_details = detect_ip_in_url(url)
+        has_ip, _, _ = detect_ip_in_url(url)
         if has_ip:
-            url_analysis['rules']['ip_in_url'] = {
-                'weight': 1.0,  # Критический вес
-                **ip_details
-            }
-            url_analysis['max_weight'] = 1.0
-            results['ip_detections'].append({
-                'url': url,
-                'ip': ip,
-                **ip_details
-            })
-        
-        # Проверка URL shortener
-        has_shortener, shortener, shortener_details = detect_url_shorteners(url)
+            return True
+    return False
+
+
+def has_shortened_url(urls: List[str]) -> bool:
+    """
+    Проверяет, содержит ли список URL-адреса из известных shortener-сервисов.
+    """
+    for url in urls:
+        has_shortener, _, _ = detect_url_shorteners(url)
         if has_shortener:
-            url_analysis['rules']['url_shortener'] = {
-                'weight': 0.8,
-                **shortener_details
-            }
-            url_analysis['max_weight'] = max(url_analysis['max_weight'], 0.8)
-            results['shortener_detections'].append({
-                'url': url,
-                'shortener': shortener,
-                **shortener_details
-            })
-        
-        results['url_analyses'].append(url_analysis)
-        results['max_weight'] = max(results['max_weight'], url_analysis['max_weight'])
-    
-    return results
+            return True
+    return False
+
+
+def _extract_entities(parsed_email_data: Dict[str, Any]) -> Tuple[List[str], List[str], List[str]]:
+    """
+    Извлекает списки URL, доменов и IP из результата email_parser.parse_email().
+    """
+    urls = parsed_email_data.get('urls', []) or []
+    domains_field = parsed_email_data.get('domains', []) or []
+    ips_field = parsed_email_data.get('ips', []) or []
+
+    if isinstance(domains_field, dict):
+        domains = domains_field.get('domains', []) or []
+        ips = domains_field.get('ips', []) or []
+    else:
+        domains = domains_field
+        if isinstance(ips_field, dict):
+            ips = ips_field.get('ips', []) or []
+        else:
+            ips = ips_field
+
+    return list(domains), list(urls), list(ips)
 
 
 @timing_decorator
-def analyze_urls_and_domains(
-    urls: List[str],
-    domains: List[str],
-    ips: Optional[List[str]] = None
-) -> Dict[str, Any]:
+def analyze_urls_and_domains(parsed_email_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Главная функция для анализа URL и доменов.
     
-    Объединяет эвристические проверки:
-    - Анализ доменов (длина, TLD)
-    - Анализ URL (IP, shorteners)
-    
-    Примечание: URL, домены и IP должны быть уже извлечены из email_parser.py
-    
-    Args:
-        urls: Список URL-адресов (извлеченных из email_parser)
-        domains: Список доменов (извлеченных из email_parser)
-        ips: Список IP-адресов (опционально, извлеченных из email_parser)
-        
-    Returns:
-        dict: Полный результат анализа со всеми признаками и весами
-    """
-    result = {
-        'urls': urls,
-        'domains': domains,
-        'ips': ips or [],
-        'domain_analyses': {},
-        'url_analyses': {},
-        'summary': {
-            'max_domain_weight': 0.0,
-            'max_url_weight': 0.0,
-            'total_suspicious_domains': 0,
-            'total_suspicious_urls': 0
-        }
-    }
-    
-    # Анализ каждого домена
-    for domain in result['domains']:
-        domain_analysis = analyze_domain_features(domain)
-        result['domain_analyses'][domain] = domain_analysis
-        result['summary']['max_domain_weight'] = max(
-            result['summary']['max_domain_weight'],
-            domain_analysis['max_weight']
-        )
-        if domain_analysis['max_weight'] > 0.5:
-            result['summary']['total_suspicious_domains'] += 1
-    
-    # Анализ URL
-    url_analysis = analyze_urls(urls)
-    result['url_analyses'] = url_analysis
-    result['summary']['max_url_weight'] = url_analysis['max_weight']
-    
-    # Подсчет подозрительных URL
-    for url_analysis_item in url_analysis['url_analyses']:
-        if url_analysis_item['max_weight'] > 0.5:
-            result['summary']['total_suspicious_urls'] += 1
-    
-    logger.info(
-        f"Проанализировано {len(result['domains'])} доменов и {len(urls)} URL. "
-        f"Подозрительных доменов: {result['summary']['total_suspicious_domains']}, "
-        f"подозрительных URL: {result['summary']['total_suspicious_urls']}"
-    )
-    
-    return result
-
-
-def analyze_from_parsed_email(parsed_email_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Удобная функция для анализа URL и доменов из результата email_parser.parse_email().
-    
-    Автоматически извлекает URL, домены и IP из структурированных данных email.
+    Самостоятельно извлекает данные из структуры, возвращаемой email_parser,
+    и рассчитывает четыре бинарных признака для FeatureExtractor.
     
     Args:
         parsed_email_data: Результат вызова email_parser.parse_email()
         
     Returns:
-        dict: Полный результат анализа со всеми признаками и весами
+        dict: Четыре булевых признака для FeatureExtractor
     """
-    # Извлечение данных из структуры parsed_email
-    urls = parsed_email_data.get('urls', [])
-    domains_data = parsed_email_data.get('domains', {})
+    domains, urls, ips = _extract_entities(parsed_email_data)
+
+    flags = {
+        'has_long_domain': any(is_long_domain(domain) for domain in domains),
+        'has_suspicious_tld': any(is_suspicious_tld(domain) for domain in domains),
+        'has_ip_in_url': has_ip_based_url(urls),
+        'has_url_shortener': has_shortened_url(urls)
+    }
     
-    # Извлечение доменов и IP из структуры domains
-    domains = domains_data.get('domains', []) if isinstance(domains_data, dict) else []
-    ips = domains_data.get('ips', []) if isinstance(domains_data, dict) else []
+    logger.info(
+        "Структурный анализ: %s",
+        {
+            'domains_checked': len(domains),
+            'urls_checked': len(urls),
+            'ips_checked': len(ips),
+            **flags
+        }
+    )
     
-    # Если domains_data - это список, используем его как есть
-    if isinstance(domains_data, list):
-        domains = domains_data
-    
-    # Вызов главной функции анализа
-    return analyze_urls_and_domains(urls=urls, domains=domains, ips=ips)
+    return flags

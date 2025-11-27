@@ -46,3 +46,134 @@
 2025-11-24 11:02:36,362 - email_parser - DEBUG - Extracted 6 headers
 2025-11-24 11:02:36,362 - email_parser - DEBUG - Extracted domains: 1, IPs: 0, email domains: 1
 2025-11-24 11:02:36,362 - email_parser - INFO - Email successfully parsed: headers=6, URLs=0, domains=1
+2025-11-24 11:33:46,368 - email_parser - DEBUG - Email successfully parsed, found 6 headers
+2025-11-24 11:33:46,368 - email_parser - DEBUG - parse_eml executed in 0.2982 sec
+2025-11-24 11:33:46,383 - email_parser - DEBUG - Extracted 6 headers
+2025-11-24 11:33:46,383 - email_parser - DEBUG - Extracted body: text=7274 chars, html=0 chars
+2025-11-24 11:33:46,394 - email_parser - DEBUG - Extracted body: text=7274 chars, html=0 chars
+2025-11-24 11:33:46,584 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:33:46,584 - email_parser - DEBUG - Extracted body: text=7274 chars, html=0 chars
+2025-11-24 11:33:46,811 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:33:46,816 - email_parser - DEBUG - Extracted 6 headers
+2025-11-24 11:33:46,823 - email_parser - DEBUG - Extracted domains: 2, IPs: 0, email domains: 2
+2025-11-24 11:33:46,823 - email_parser - INFO - Email successfully parsed: headers=6, URLs=0, domains=2
+2025-11-24 11:34:23,826 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 11:34:23,860 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 11:34:23,864 - email_parser - DEBUG - parse_eml executed in 0.1783 sec
+2025-11-24 11:34:23,867 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 11:34:23,869 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 11:34:23,872 - email_parser - DEBUG - Extracted metadata for 1 attachments
+2025-11-24 11:34:23,874 - email_parser - DEBUG - Computed 1 SHA-256 hashes for attachments
+2025-11-24 11:34:23,878 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 11:34:23,888 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:34:23,888 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 11:34:23,888 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:34:23,888 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 11:34:23,904 - email_parser - DEBUG - Extracted domains: 3, IPs: 1, email domains: 2
+2025-11-24 11:34:23,904 - email_parser - INFO - Email successfully parsed: headers=11, URLs=0, domains=3
+2025-11-24 11:54:23,281 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 11:54:23,302 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 11:54:23,312 - email_parser - DEBUG - parse_eml executed in 0.1715 sec
+2025-11-24 11:54:23,312 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 11:54:23,312 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 11:54:23,312 - email_parser - DEBUG - Extracted metadata for 1 attachments
+2025-11-24 11:54:23,312 - email_parser - DEBUG - Computed 1 SHA-256 hashes for attachments
+2025-11-24 11:54:23,328 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 11:54:23,328 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:54:23,328 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 11:54:23,344 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:54:23,356 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 11:54:23,363 - email_parser - DEBUG - Extracted domains: 3, IPs: 1, email domains: 2
+2025-11-24 11:54:23,363 - email_parser - INFO - Email successfully parsed: headers=11, URLs=0, domains=3
+2025-11-24 11:57:01,020 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 11:57:01,056 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 11:57:01,061 - email_parser - DEBUG - parse_eml executed in 0.1290 sec
+2025-11-24 11:57:01,063 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 11:57:01,066 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 11:57:01,069 - email_parser - DEBUG - Extracted metadata for 1 attachments
+2025-11-24 11:57:01,072 - email_parser - DEBUG - Computed 1 SHA-256 hashes for attachments
+2025-11-24 11:57:01,072 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 11:57:01,072 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:57:01,088 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 11:57:01,088 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 11:57:01,088 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 11:57:01,103 - email_parser - DEBUG - Extracted domains: 3, IPs: 1, email domains: 2
+2025-11-24 11:57:01,106 - email_parser - INFO - Email successfully parsed: headers=11, URLs=0, domains=3
+2025-11-24 12:06:08,954 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 12:06:08,966 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 12:06:08,985 - email_parser - DEBUG - parse_eml executed in 0.1783 sec
+2025-11-24 12:06:08,985 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 12:06:08,994 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 12:06:08,994 - email_parser - DEBUG - Extracted metadata for 1 attachments
+2025-11-24 12:06:08,994 - email_parser - DEBUG - Computed 1 SHA-256 hashes for attachments
+2025-11-24 12:06:08,994 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 12:06:09,021 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 12:06:09,025 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 12:06:09,027 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 12:06:09,027 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 12:06:09,041 - email_parser - DEBUG - Extracted domains: 3, IPs: 1, email domains: 2
+2025-11-24 12:06:09,041 - email_parser - INFO - Email successfully parsed: headers=11, URLs=0, domains=3
+2025-11-24 12:08:23,851 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 12:08:23,883 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 12:08:23,883 - email_parser - DEBUG - parse_eml executed in 0.1551 sec
+2025-11-24 12:08:23,883 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 12:08:23,898 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 12:08:23,898 - email_parser - DEBUG - Extracted metadata for 1 attachments
+2025-11-24 12:08:23,898 - email_parser - DEBUG - Computed 1 SHA-256 hashes for attachments
+2025-11-24 12:08:23,898 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 12:08:23,914 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 12:08:23,914 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 12:08:23,940 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 12:08:23,940 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 12:08:23,945 - email_parser - DEBUG - Extracted domains: 3, IPs: 1, email domains: 2
+2025-11-24 12:08:23,945 - email_parser - INFO - Email successfully parsed: headers=11, URLs=0, domains=3
+2025-11-24 12:17:24,920 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 12:17:24,951 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 12:17:24,951 - email_parser - DEBUG - parse_eml executed in 0.1208 sec
+2025-11-24 12:17:24,951 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 12:17:24,967 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 12:17:24,967 - email_parser - DEBUG - Extracted metadata for 1 attachments
+2025-11-24 12:17:24,967 - email_parser - DEBUG - Computed 1 SHA-256 hashes for attachments
+2025-11-24 12:17:24,967 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 12:17:24,967 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 12:17:24,984 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 12:17:24,984 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 12:17:24,999 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 12:17:25,001 - email_parser - DEBUG - Extracted domains: 3, IPs: 1, email domains: 2
+2025-11-24 12:17:25,001 - email_parser - INFO - Email successfully parsed: headers=11, URLs=0, domains=3
+2025-11-24 12:20:53,756 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 12:20:53,788 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 12:20:53,788 - email_parser - DEBUG - parse_eml executed in 0.1980 sec
+2025-11-24 12:21:25,198 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 12:27:36,717 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 12:27:36,751 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 12:27:36,751 - email_parser - DEBUG - parse_eml executed in 0.2509 sec
+2025-11-24 12:34:01,055 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 12:34:01,102 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 12:34:01,115 - email_parser - DEBUG - parse_eml executed in 0.1828 sec
+2025-11-24 12:35:38,226 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 12:35:38,273 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 12:35:38,288 - email_parser - DEBUG - parse_eml executed in 0.2346 sec
+2025-11-24 12:35:54,887 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 12:35:54,919 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 12:35:54,919 - email_parser - DEBUG - parse_eml executed in 0.1725 sec
+2025-11-24 12:42:37,604 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 12:42:37,641 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 12:42:37,641 - email_parser - DEBUG - parse_eml executed in 0.1931 sec
+2025-11-24 12:42:45,118 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 12:42:45,151 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 12:42:45,151 - email_parser - DEBUG - parse_eml executed in 0.3148 sec
+2025-11-24 12:43:06,055 - charset_normalizer - DEBUG - Encoding detection: utf_8 is most likely the one.
+2025-11-24 12:43:06,071 - email_parser - DEBUG - Email successfully parsed, found 11 headers
+2025-11-24 12:43:06,071 - email_parser - DEBUG - parse_eml executed in 0.1254 sec
+2025-11-24 12:43:06,071 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 12:43:06,071 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 12:43:06,086 - email_parser - DEBUG - Extracted metadata for 1 attachments
+2025-11-24 12:43:06,092 - email_parser - DEBUG - Computed 1 SHA-256 hashes for attachments
+2025-11-24 12:43:06,094 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 12:43:06,102 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 12:43:06,102 - email_parser - DEBUG - Extracted body: text=74 chars, html=4782 chars
+2025-11-24 12:43:06,102 - email_parser - DEBUG - Extracted 0 unique URLs
+2025-11-24 12:43:06,117 - email_parser - DEBUG - Extracted 11 headers
+2025-11-24 12:43:06,117 - email_parser - DEBUG - Extracted domains: 3, IPs: 1, email domains: 2
+2025-11-24 12:43:06,117 - email_parser - INFO - Email successfully parsed: headers=11, URLs=0, domains=3

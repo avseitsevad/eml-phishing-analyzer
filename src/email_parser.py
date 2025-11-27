@@ -1,764 +1,414 @@
 """
-Email Parser Module (Исправленная версия)
+Email Parser Module
 
-Модуль парсинга email сообщений с поддержкой различных форматов входных данных:
-- .eml файлы
-- Текстовые строки из CSV датасетов (Nazario, Enron)
-- Байтовые последовательности
+Модуль парсинга email сообщений для системы детектирования фишинга.
+Использует стандартную библиотеку email.parser
+Поддерживает .eml файлы с декодированием UTF-8, Windows-1251, KOI8-R.
+
+Основные функции:
+- load_eml_file(): чтение и декодирование .eml файла
+- parse_email(): парсинг структуры RFC 5322 + MIME
 
 Извлекаемые компоненты:
-- Заголовки (headers): From, To, Subject, Date, Authentication-Results и др.
-- Тело письма (body): text/plain и text/html части
-- Вложения (attachments): метаданные и SHA-256 хэши
-- URL-адреса из текста и HTML
-- Домены и IP-адреса из URL и заголовков
-- Multipart структуры
+- Заголовки: From, To, Subject, Date, Message-ID, Received, Authentication-Results,
+  Reply-To, Return-Path
+- Тело письма: text/plain и text/html с учетом multipart структур
+- Вложения: метаданные (имя, тип, размер, SHA-256)
+- URL-адреса, домены и IP-адреса из текста, HTML и заголовков
 """
-
 
 import logging
 import hashlib
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
-import eml_parser
+from urllib.parse import urlparse
+from email.parser import BytesParser
+from email.policy import default
+from email.message import EmailMessage
 from bs4 import BeautifulSoup
 from urlextract import URLExtract
+from utils import (
+    timing_decorator,
+    validate_eml_format,
+    extract_hostname_from_url,
+    normalize_domain
+)
 import tldextract
 
 
-# Инициализация URLExtract для извлечения URL
 url_extractor = URLExtract()
-
-# Настройка логирования
 logger = logging.getLogger(__name__)
 
 
-def timing_decorator(func):
-    """Декоратор для измерения времени выполнения функции"""
-    import time
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        elapsed_time = time.time() - start_time
-        logger.debug(f"{func.__name__} executed in {elapsed_time:.4f} sec")
-        return result
-    return wrapper
-
-
-def validate_eml_format(email_str: str) -> bool:
+def load_eml_file(file_input: Union[str, Path, Any]) -> str:
     """
-    Базовая валидация формата email.
-    
-    Проверяет наличие основных компонентов email сообщения:
-    - Заголовки (хотя бы один из: From, To, Subject, Message-ID, Date)
-    - Разделитель между заголовками и телом (двойной перевод строки)
+    Чтение файлового объекта/пути, декодирование с поддержкой UTF-8, 
+    Windows-1251, KOI8-R, базовая валидация структуры.
     
     Args:
-        email_str: Строка с содержимым email
+        file_input: Путь к файлу или файловый объект
         
     Returns:
-        bool: True если формат корректен, False иначе
+        str: Содержимое письма как строка
+        
+    Raises:
+        FileNotFoundError: Если файл не найден
+        ValueError: Если файл невалиден или слишком короткий
     """
-    if not email_str or not isinstance(email_str, str):
-        return False
+    # Чтение файла
+    if isinstance(file_input, (str, Path)):
+        path = Path(file_input)
+        if not path.exists():
+            raise FileNotFoundError(f"File not found: {path}")
+        with open(path, 'rb') as f:
+            content_bytes = f.read()
+    elif hasattr(file_input, 'read'):
+        content_bytes = file_input.read()
+        if isinstance(content_bytes, str):
+            content_bytes = content_bytes.encode('utf-8')
+    else:
+        raise ValueError(f"Unsupported input type: {type(file_input)}")
     
-    # Проверка наличия базовых заголовков
-    basic_headers = ['From:', 'To:', 'Subject:', 'Message-ID:', 'Date:']
-    has_header = any(header.lower() in email_str.lower()[:1000] for header in basic_headers)
+    # Декодирование с поддержкой UTF-8, Windows-1251, KOI8-R
+    content_str = decode_text(content_bytes)
     
-    # Проверка наличия разделителя заголовков и тела
-    has_separator = '\n\n' in email_str or '\r\n\r\n' in email_str
+    # Валидация: наличие ':' и минимальная длина >50
+    if ':' not in content_str:
+        raise ValueError("Invalid email format: no ':' found in headers")
     
-    return has_header and has_separator
+    if len(content_str) <= 50:
+        raise ValueError(f"Email too short: {len(content_str)} characters (minimum 50 required)")
+    
+    # Дополнительная валидация через validate_eml_format
+    if not validate_eml_format(content_str):
+        raise ValueError("Provided content is not a valid .eml message")
+    
+    return content_str
 
 
 def decode_text(content: Union[str, bytes]) -> str:
-    """
-    Универсальная функция декодирования текста.
-    
-    Пробует различные кодировки для корректного декодирования содержимого.
-    
-    Args:
-        content: Текст или байты для декодирования
-        
-    Returns:
-        str: Декодированная строка
-    """
+    """Универсальная функция декодирования текста с поддержкой UTF-8, Windows-1251, KOI8-R"""
     if isinstance(content, str):
         return content
-    
     if not isinstance(content, bytes):
         return str(content)
     
-    # Список кодировок для попытки декодирования
-    encodings = ['utf-8', 'windows-1251', 'iso-8859-1', 'cp1252']
-    
-    for encoding in encodings:
+    for encoding in ['utf-8', 'windows-1251', 'koi8-r']:
         try:
             return content.decode(encoding)
         except (UnicodeDecodeError, AttributeError):
             continue
     
-    # Если все попытки не удались, используем utf-8 с игнорированием ошибок
     return content.decode('utf-8', errors='ignore')
 
 
-@timing_decorator
-def parse_eml(email_content: Union[str, bytes, Path]) -> Dict[str, Any]:
+def extract_headers(message: EmailMessage) -> Dict[str, Any]:
     """
-    Парсинг email с использованием eml_parser.
-    Поддерживает RFC 5322 и MIME (RFC 2046).
-    
-    Улучшенная версия с корректной обработкой различных форматов:
-    - Путь к .eml файлу
-    - Текстовая строка из CSV датасета
-    - Байтовая последовательность
-    
-    Args:
-        email_content: Содержимое email (строка, байты или путь к файлу)
-        
-    Returns:
-        dict: Словарь с распарсенными данными email
-        
-    Raises:
-        ValueError: Если формат email невалиден или парсинг не удался
-    """
-    email_bytes = None
-    
-    # 1. Обработка входных данных
-    if isinstance(email_content, Path):
-        # Если передан объект Path
-        if email_content.exists() and email_content.is_file():
-            with open(email_content, 'rb') as f:
-                email_bytes = f.read()
-        else:
-            raise ValueError(f"File not found: {email_content}")
-            
-    elif isinstance(email_content, str):
-        # Если передана строка
-        # Сначала проверяем длину строки
-        if len(email_content) < 256:
-            # Только короткие строки проверяем как пути к файлам
-            try:
-                file_path = Path(email_content)
-                if file_path.exists() and file_path.is_file():
-                    with open(file_path, 'rb') as f:
-                        email_bytes = f.read()
-                else:
-                    # Короткая строка, но не файл - это содержимое email
-                    email_bytes = email_content.encode('utf-8', errors='replace')
-            except (OSError, ValueError):
-                # Ошибка при работе с путем - это содержимое email
-                email_bytes = email_content.encode('utf-8', errors='replace')
-        else:
-            # Длинная строка - это точно содержимое email из CSV
-            email_bytes = email_content.encode('utf-8', errors='replace')
-            
-    elif isinstance(email_content, bytes):
-        # Если уже байты - используем как есть
-        email_bytes = email_content
-    else:
-        raise ValueError(f"Unsupported input data type: {type(email_content)}")
-    
-    # 2. Валидация формата (опциональная проверка)
-    try:
-        email_str = decode_text(email_bytes)
-        if not validate_eml_format(email_str):
-            logger.warning("Email format may be invalid, continuing parsing")
-    except Exception as e:
-        logger.warning(f"Error during format validation: {e}")
-    
-    # 3. Парсинг через eml_parser
-    try:
-        ep = eml_parser.EmlParser(
-            include_raw_body=True,
-            include_attachment_data=True
-        )
-        parsed = ep.decode_email_bytes(email_bytes)
-        
-        if not parsed:
-            raise ValueError("Failed to parse email")
-        
-        logger.debug(f"Email successfully parsed, found {len(parsed.get('header', {}))} headers")
-        
-        return parsed
-        
-    except Exception as e:
-        logger.error(f"Error parsing email via eml_parser: {e}")
-        raise ValueError(f"Email parsing error: {e}")
-
-
-def extract_headers(parsed_email: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Извлечение заголовков email.
-    
     Извлекаемые заголовки:
     - Основные: From, To, Subject, Date, Message-ID
-    - Маршрутизация: Received, Return-Path, Reply-To
-    - Аутентификация: Authentication-Results, DKIM-Signature, SPF, DMARC
-    - Дополнительные: Content-Type, MIME-Version, X-* заголовки
+    - Маршрутизация: Received, Reply-To, Return-Path, References
+    - Аутентификация: Authentication-Results
+    - MIME: Content-Type (для определения структуры письма)
     
-    Args:
-        parsed_email: Результат парсинга от parse_eml()
-        
-    Returns:
-        dict: Словарь с заголовками (ключи в нижнем регистре)
+    Все заголовки возвращаются как строки (кроме 'received', который возвращается как список строк).
     """
     headers = {}
+    required_headers = [
+        'from', 'to', 'subject', 'date', 'message-id',
+        'received', 'authentication-results', 
+        'reply-to', 'return-path', 'references',
+        'content-type'
+    ]
     
-    try:
-        email_headers = parsed_email.get('header', {})
-        
-        if not email_headers:
-            logger.warning("Headers not found in parsed email")
-            return headers
-        
-        # Список основных заголовков
-        priority_headers = [
-            'from', 'to', 'subject', 'date', 'message-id',
-            'received', 'return-path', 'reply-to', 'cc', 'bcc',
-            'authentication-results', 'dkim-signature',
-            'content-type', 'mime-version',
-            'x-mailer', 'x-originating-ip'
-        ]
-        
-        # Извлечение приоритетных заголовков
-        for key in priority_headers:
-            value = email_headers.get(key) or email_headers.get(key.lower()) or email_headers.get(key.upper())
-            
+    for header_name in required_headers:
+        if header_name == 'received':
+            values = message.get_all(header_name)
+            if values:
+                headers[header_name] = [str(v) if v else '' for v in values]
+        else:
+            value = message.get(header_name)
             if value:
-                # Обработка списков (некоторые заголовки могут быть списками)
-                if isinstance(value, list):
-                    headers[key] = value[0] if value else None
-                else:
-                    headers[key] = value
-        
-        # Извлечение всех остальных заголовков
-        for key, value in email_headers.items():
-            normalized_key = key.lower()
-            if normalized_key not in headers:
-                if isinstance(value, list):
-                    headers[normalized_key] = value[0] if value else None
-                else:
-                    headers[normalized_key] = value
-        
-        logger.debug(f"Extracted {len(headers)} headers")
-        
-    except Exception as e:
-        logger.error(f"Error extracting headers: {e}")
+                headers[header_name] = str(value)
     
     return headers
 
 
-def extract_body(parsed_email: Dict[str, Any]) -> Dict[str, str]:
+def extract_body(message: EmailMessage) -> Dict[str, str]:
     """
     Извлечение тела письма: text/plain и text/html.
-    
-    Args:
-        parsed_email: Результат парсинга от parse_eml()
-        
-    Returns:
-        dict: Словарь с ключами 'text' и 'html'
+    Обрабатывает multipart структуры (alternative, mixed, related).
     """
-    body = {
-        'text': '',
-        'html': ''
-    }
+    body = {'text': '', 'html': ''}
     
-    try:
-        email_body = parsed_email.get('body', [])
-        
-        if isinstance(email_body, list):
-            # Стандартный формат eml_parser - список частей
-            for part in email_body:
-                content_type = part.get('content_type', '').lower()
-                content = part.get('content', '')
-                
-                if 'text/plain' in content_type:
-                    body['text'] = decode_text(content) if content else ''
-                elif 'text/html' in content_type:
-                    body['html'] = decode_text(content) if content else ''
-        
-        elif isinstance(email_body, dict):
-            # Альтернативный формат - словарь с ключами text/html
-            if 'text' in email_body:
-                text_parts = email_body['text']
-                if isinstance(text_parts, list) and text_parts:
-                    body['text'] = decode_text(text_parts[0])
-                elif isinstance(text_parts, str):
-                    body['text'] = decode_text(text_parts)
+    if message.is_multipart():
+        for part in message.walk():
+            content_type = part.get_content_type()
+            content_disposition = str(part.get('Content-Disposition', '')).lower()
             
-            if 'html' in email_body:
-                html_parts = email_body['html']
-                if isinstance(html_parts, list) and html_parts:
-                    body['html'] = decode_text(html_parts[0])
-                elif isinstance(html_parts, str):
-                    body['html'] = decode_text(html_parts)
-        
-        # Если тело не найдено через body, пробуем raw_body
-        if not body['text'] and not body['html']:
-            raw_body = parsed_email.get('raw_body', [])
-            if raw_body:
-                if isinstance(raw_body, list):
-                    # Берем первую часть
-                    body['text'] = decode_text(raw_body[0]) if raw_body else ''
-                elif isinstance(raw_body, (str, bytes)):
-                    body['text'] = decode_text(raw_body)
-        
-        logger.debug(f"Extracted body: text={len(body['text'])} chars, html={len(body['html'])} chars")
-        
-    except Exception as e:
-        logger.error(f"Error extracting body: {e}")
+            if 'attachment' in content_disposition or part.is_multipart():
+                continue
+            
+            if content_type == 'text/plain' and not body['text']:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or 'utf-8'
+                    body['text'] = payload.decode(charset, errors='ignore').strip()
+            elif content_type == 'text/html' and not body['html']:
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or 'utf-8'
+                    body['html'] = payload.decode(charset, errors='ignore').strip()
+    else:
+        content_type = message.get_content_type()
+        payload = message.get_payload(decode=True)
+        if payload:
+            charset = message.get_content_charset() or 'utf-8'
+            decoded = payload.decode(charset, errors='ignore').strip()
+            if content_type == 'text/plain':
+                body['text'] = decoded
+            elif content_type == 'text/html':
+                body['html'] = decoded
     
     return body
 
 
-def extract_multipart(parsed_email: Dict[str, Any]) -> Dict[str, Any]:
+def extract_attachments_metadata(message: EmailMessage) -> List[Dict[str, Any]]:
     """
-    Обработка multipart структур (multipart/mixed, multipart/alternative).
-    
-    Args:
-        parsed_email: Результат парсинга от parse_eml()
-        
-    Returns:
-        dict: Информация о multipart структуре
-    """
-    multipart_info = {
-        'is_multipart': False,
-        'content_type': '',
-        'type': 'single',
-        'parts': []
-    }
-    
-    try:
-        headers = parsed_email.get('header', {})
-        content_type = headers.get('content-type', '') or headers.get('content_type', '')
-        
-        if isinstance(content_type, list):
-            content_type = content_type[0] if content_type else ''
-        
-        content_type_str = str(content_type).lower()
-        
-        # Проверка наличия multipart в Content-Type
-        if 'multipart' in content_type_str:
-            multipart_info['is_multipart'] = True
-            multipart_info['content_type'] = content_type
-            
-            # Определение типа multipart
-            if 'multipart/mixed' in content_type_str:
-                multipart_info['type'] = 'mixed'
-            elif 'multipart/alternative' in content_type_str:
-                multipart_info['type'] = 'alternative'
-            elif 'multipart/related' in content_type_str:
-                multipart_info['type'] = 'related'
-            else:
-                multipart_info['type'] = 'other'
-            
-            # Извлечение информации о частях (body parts)
-            body = parsed_email.get('body', [])
-            if isinstance(body, list):
-                for part in body:
-                    part_info = {
-                        'content_type': part.get('content_type', 'unknown'),
-                        'size': len(str(part.get('content', '')))
-                    }
-                    multipart_info['parts'].append(part_info)
-            
-            # Добавление информации о вложениях как части multipart
-            attachments = parsed_email.get('attachment', [])
-            if attachments:
-                for att in attachments:
-                    part_info = {
-                        'content_type': att.get('content_type', 'unknown'),
-                        'size': att.get('size', 0),
-                        'is_attachment': True,
-                        'filename': att.get('filename', 'unknown')
-                    }
-                    multipart_info['parts'].append(part_info)
-            
-            logger.debug(f"Found multipart structure: {multipart_info['type']}, parts: {len(multipart_info['parts'])}")
-        
-    except Exception as e:
-        logger.error(f"Error processing multipart: {e}")
-    
-    return multipart_info
-
-
-def extract_attachments_metadata(parsed_email: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Извлечение метаданных вложений (имя, тип, размер).
-    
-    Args:
-        parsed_email: Результат парсинга от parse_eml()
-        
-    Returns:
-        list: Список словарей с метаданными вложений
+    Извлечение метаданных вложений.
+    Не сохраняет файлы на диск - только метаданные.
     """
     attachments = []
     
-    try:
-        email_attachments = parsed_email.get('attachment', [])
+    for part in message.walk():
+        if part.is_multipart():
+            continue
         
-        if not email_attachments:
-            return attachments
+        content_disposition = str(part.get('Content-Disposition', '')).lower()
         
-        for att in email_attachments:
-            metadata = {
-                'filename': att.get('filename', 'unknown'),
-                'content_type': att.get('content_type', 'unknown'),
-                'size': 0,
-                'content_disposition': att.get('content_disposition', '')
-            }
+        if 'attachment' in content_disposition:
+            filename = part.get_filename()
+            content_type = part.get_content_type()
+            payload = part.get_payload(decode=True)
+            size = len(payload) if payload else 0
+            sha256_hash = hashlib.sha256(payload).hexdigest() if payload else ''
             
-            # Определение размера вложения
-            raw_data = att.get('raw', b'')
-            if raw_data:
-                metadata['size'] = len(raw_data)
-            else:
-                # Альтернативный способ через payload
-                content = att.get('payload', '') or att.get('content', '')
-                if content:
-                    if isinstance(content, bytes):
-                        metadata['size'] = len(content)
-                    else:
-                        metadata['size'] = len(str(content))
-            
-            attachments.append(metadata)
-        
-        logger.debug(f"Extracted metadata for {len(attachments)} attachments")
-        
-    except Exception as e:
-        logger.error(f"Error extracting attachment metadata: {e}")
+            attachments.append({
+                'filename': filename or 'unknown',
+                'content_type': content_type,
+                'size': size,
+                'sha256': sha256_hash
+            })
     
     return attachments
 
 
-def compute_attachment_hashes(parsed_email: Dict[str, Any]) -> List[Dict[str, str]]:
+def extract_urls(message: EmailMessage, body: Optional[Dict[str, str]] = None) -> List[str]:
     """
-    Вычисление SHA-256 хэшей вложений (in-memory).
-    
-    Args:
-        parsed_email: Результат парсинга от parse_eml()
-        
-    Returns:
-        list: Список словарей с filename и sha256 хэшем
-    """
-    hashes = []
-    
-    try:
-        email_attachments = parsed_email.get('attachment', [])
-        
-        if not email_attachments:
-            return hashes
-        
-        for att in email_attachments:
-            filename = att.get('filename', 'unknown')
-            raw_data = att.get('raw', b'')
-            
-            if raw_data:
-                # Вычисление SHA-256 хэша
-                sha256_hash = hashlib.sha256(raw_data).hexdigest()
-                hashes.append({
-                    'filename': filename,
-                    'sha256': sha256_hash
-                })
-            else:
-                # Попытка через payload
-                payload = att.get('payload', '') or att.get('content', '')
-                if payload:
-                    if isinstance(payload, str):
-                        payload_bytes = payload.encode('utf-8', errors='ignore')
-                    else:
-                        payload_bytes = payload
-                    
-                    sha256_hash = hashlib.sha256(payload_bytes).hexdigest()
-                    hashes.append({
-                        'filename': filename,
-                        'sha256': sha256_hash
-                    })
-                else:
-                    logger.warning(f"Failed to compute hash for attachment: {filename}")
-        
-        logger.debug(f"Computed {len(hashes)} SHA-256 hashes for attachments")
-        
-    except Exception as e:
-        logger.error(f"Error computing attachment hashes: {e}")
-    
-    return hashes
-
-
-def extract_urls(parsed_email: Dict[str, Any]) -> List[str]:
-    """
-    Извлечение URL из текста и HTML тела письма.
-    
-    Использует URLExtract для обнаружения URL в тексте и BeautifulSoup
-    для извлечения URL из HTML-атрибутов (href, src).
-    
-    Args:
-        parsed_email: Результат парсинга от parse_eml()
-        
-    Returns:
-        list: Список уникальных URL
+    Извлечение URL из текста и HTML.
+    Использует urlextract и BeautifulSoup для парсинга HTML.
     """
     urls = []
     
-    try:
-        # Извлечение тела письма
-        body = extract_body(parsed_email)
-        
-        # 1. Извлечение URL из text/plain
-        if body['text']:
-            try:
-                text_urls = url_extractor.find_urls(body['text'])
-                urls.extend(text_urls)
-            except Exception as e:
-                logger.warning(f"Error extracting URLs from text: {e}")
-        
-        # 2. Извлечение URL из text/html
-        if body['html']:
-            try:
-                soup = BeautifulSoup(body['html'], 'html.parser')
-                
-                # Извлечение URL из атрибутов href, src, action
-                for tag in soup.find_all(['a', 'img', 'link', 'script', 'iframe', 'form']):
-                    for attr in ['href', 'src', 'action']:
-                        url = tag.get(attr)
-                        if url and isinstance(url, str):
-                            urls.append(url.strip())
-                
-                # Также извлекаем URL из текста HTML через urlextract
-                html_text = soup.get_text()
-                html_urls = url_extractor.find_urls(html_text)
-                urls.extend(html_urls)
-                
-            except Exception as e:
-                logger.warning(f"Error parsing HTML: {e}")
-                # Fallback: извлечение URL напрямую из HTML строки
-                try:
-                    html_urls = url_extractor.find_urls(body['html'])
-                    urls.extend(html_urls)
-                except:
-                    pass
-        
-        # 3. Очистка и фильтрация URL
-        cleaned_urls = []
-        for url in urls:
-            url = url.strip()
-            # Фильтрация корректных URL (начинаются с протокола)
-            if url and (url.startswith(('http://', 'https://', 'ftp://')) or '://' in url):
-                cleaned_urls.append(url)
-        
-        # Удаление дубликатов
-        unique_urls = list(set(cleaned_urls))
-        
-        logger.debug(f"Extracted {len(unique_urls)} unique URLs")
-        
-    except Exception as e:
-        logger.error(f"Error extracting URLs: {e}")
-        unique_urls = []
+    if body is None:
+        body = extract_body(message)
     
-    return unique_urls
+    # Из text/plain
+    if body['text']:
+        urls.extend(url_extractor.find_urls(body['text']))
+    
+    # Из text/html
+    if body['html']:
+        soup = BeautifulSoup(body['html'], 'html.parser')
+        
+        # Извлекаем URL из атрибутов тегов
+        for tag in soup.find_all(['a', 'img', 'link', 'script', 'iframe', 'form']):
+            for attr in ['href', 'src', 'action']:
+                url = tag.get(attr)
+                if url and isinstance(url, str):
+                    urls.append(url.strip())
+        
+        # Ищем URL в тексте HTML
+        urls.extend(url_extractor.find_urls(soup.get_text()))
+    
+    # Фильтрация и очистка
+    cleaned_urls = [
+        url.strip() for url in urls
+        if url and (url.startswith(('http://', 'https://', 'ftp://')) or '://' in url)
+    ]
+    
+    return list(set(cleaned_urls))
 
 
-def extract_domains(parsed_email: Dict[str, Any]) -> Dict[str, List[str]]:
+def extract_domains(
+    message: EmailMessage,
+    headers: Optional[Dict[str, Any]] = None,
+    urls: Optional[List[str]] = None
+) -> Dict[str, List[str]]:
     """
-    Извлечение доменов и IP-адресов из email.
+    Извлечение доменов и IP-адресов из:
+    - URL в теле письма (с поддоменами 2, 3 и более уровней)
+    - Email адресов в заголовках (From, To, Reply-To, Return-Path)
+    - Заголовков Received
     
-    Источники доменов:
-    - URL в теле письма
-    - Email адреса в заголовках (From, To, Reply-To, Return-Path)
-    - IP-адреса в URL и заголовках Received
-    
-    Args:
-        parsed_email: Результат парсинга от parse_eml()
-        
-    Returns:
-        dict: Словарь с ключами:
-            - 'domains': список уникальных доменов из URL
-            - 'ips': список уникальных IP-адресов
-            - 'email_domains': домены из email адресов в заголовках
+    Домены извлекаются целиком с сохранением всех уровней поддоменов.
+    Префикс 'www.' автоматически удаляется из доменов.
     """
-    domains = []
-    ips = []
-    email_domains = []
+    domains: List[str] = []
+    ips: List[str] = []
     
-    try:
-        # 1. Извлечение доменов из URL
-        urls = extract_urls(parsed_email)
+    remove_www = lambda d: d[4:] if d and d.lower().startswith('www.') else d
+    ip_pattern = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+    domain_pattern = re.compile(r'^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$', re.IGNORECASE)
+    email_pattern = re.compile(r'@([a-zA-Z0-9._-]+\.[a-zA-Z]{2,})', re.IGNORECASE)
+    received_pattern = re.compile(r'from\s+((?:[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,})', re.IGNORECASE)
+    
+    # 1. Из URL в теле письма
+    if urls is None:
+        urls = extract_urls(message)
+
+    for url in urls:
+        hostname, is_ip = extract_hostname_from_url(url)
+        if not hostname:
+            continue
         
-        ip_pattern = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+        hostname = remove_www(hostname.lower())
         
-        for url in urls:
+        if is_ip:
+            ips.append(hostname)
+            continue
+        
+        if domain_pattern.match(hostname) or re.match(r'^[a-z0-9\.\-]+$', hostname, re.IGNORECASE):
+            domains.append(hostname)
+            normalized = normalize_domain(hostname)
+            if normalized and normalized != hostname:
+                domains.append(remove_www(normalized))
+    
+    # 2. Из email адресов в заголовках
+    if headers is None:
+        headers = extract_headers(message)
+    for field in ['from', 'to', 'reply-to', 'return-path']:
+        if header_value := headers.get(field, ''):
+            for match in email_pattern.finditer(header_value):
+                email_domain = match.group(1)
+                if email_domain and not ip_pattern.match(email_domain):
+                    domains.append(remove_www(email_domain.lower()))
+            ips.extend(ip_pattern.findall(header_value))
+    
+    # 3. Из заголовков Received
+    received_headers = headers.get('received', [])
+    if not isinstance(received_headers, list):
+        received_headers = [received_headers] if received_headers else []
+    
+    for received in received_headers:
+        received_str = str(received)
+        for match in received_pattern.finditer(received_str):
+            domain = match.group(1)
+            if domain and not ip_pattern.match(domain):
+                domains.append(remove_www(domain.lower()))
+        ips.extend(ip_pattern.findall(received_str))
+    
+    # 4. Валидация IP-адресов
+    valid_ips = []
+    for ip in set(ips):
+        parts = ip.split('.')
+        if len(parts) == 4:
             try:
-                # Проверка на IP-адрес в URL
-                ip_match = ip_pattern.search(url)
-                if ip_match:
-                    ip = ip_match.group()
-                    if ip not in ips:
-                        ips.append(ip)
-                else:
-                    # Извлечение домена через tldextract
-                    extracted = tldextract.extract(url)
-                    if extracted.domain and extracted.suffix:
-                        domain = f"{extracted.domain}.{extracted.suffix}"
-                        if domain not in domains:
-                            domains.append(domain.lower())
-            except Exception as e:
-                logger.debug(f"Error extracting domain from URL {url}: {e}")
-        
-        # 2. Извлечение доменов из email адресов в заголовках
-        headers = extract_headers(parsed_email)
-        email_header_fields = ['from', 'to', 'reply-to', 'return-path', 'cc', 'bcc']
-        
-        email_pattern = re.compile(r'[\w\.-]+@([\w\.-]+\.\w+)', re.IGNORECASE)
-        
-        for field in email_header_fields:
-            header_value = headers.get(field, '')
-            if not header_value:
+                if all(0 <= int(part) <= 255 for part in parts):
+                    valid_ips.append(ip)
+            except ValueError:
                 continue
-            
-            # Извлечение email адресов и их доменов
-            email_matches = email_pattern.findall(str(header_value))
-            for email_domain in email_matches:
-                email_domain_lower = email_domain.lower()
-                if email_domain_lower not in email_domains:
-                    email_domains.append(email_domain_lower)
-            
-            # Извлечение IP-адресов из заголовков
-            ip_matches = ip_pattern.findall(str(header_value))
-            for ip in ip_matches:
-                if ip not in ips:
-                    ips.append(ip)
-        
-        # 3. Извлечение доменов и IP из заголовка Received
-        received_headers = headers.get('received', [])
-        if not isinstance(received_headers, list):
-            received_headers = [received_headers] if received_headers else []
-        
-        for received in received_headers:
-            received_str = str(received)
-            
-            # Поиск доменов в Received (паттерн: from domain.com)
-            domain_matches = re.findall(
-                r'from\s+([\w\.-]+\.\w+)',
-                received_str,
-                re.IGNORECASE
-            )
-            for domain in domain_matches:
-                domain_lower = domain.lower()
-                if domain_lower not in domains:
-                    domains.append(domain_lower)
-            
-            # Поиск IP-адресов в Received
-            ip_matches = ip_pattern.findall(received_str)
-            for ip in ip_matches:
-                if ip not in ips:
-                    ips.append(ip)
-        
-        # 4. Валидация IP-адресов
-        valid_ips = []
-        for ip in ips:
-            parts = ip.split('.')
-            if len(parts) == 4:
-                try:
-                    if all(0 <= int(part) <= 255 for part in parts):
-                        valid_ips.append(ip)
-                except ValueError:
-                    continue
-        
-        # 5. Объединение всех доменов
-        all_domains = list(set(domains + email_domains))
-        
-        result = {
-            'domains': sorted(all_domains),
-            'ips': sorted(list(set(valid_ips))),
-            'email_domains': sorted(list(set(email_domains)))
-        }
-        
-        logger.debug(f"Extracted domains: {len(result['domains'])}, IPs: {len(result['ips'])}, email domains: {len(result['email_domains'])}")
-        
-    except Exception as e:
-        logger.error(f"Error extracting domains: {e}")
-        result = {
-            'domains': [],
-            'ips': [],
-            'email_domains': []
-        }
+    
+    result = {
+        'domains': sorted(set(domains)),
+        'ips': sorted(set(valid_ips))
+    }
     
     return result
 
 
-def parse_email(email_content: Union[str, bytes, Path]) -> Dict[str, Any]:
+@timing_decorator
+def parse_email(email_string: str) -> Dict[str, Any]:
     """
-    Главная функция парсинга email с извлечением всех компонентов.
-    
-    Универсальная функция, объединяющая все этапы парсинга:
-    1. Парсинг базовой структуры email
-    2. Извлечение заголовков
-    3. Извлечение тела письма (text/html)
-    4. Анализ multipart структуры
-    5. Обработка вложений (метаданные и хэши)
-    6. Извлечение URL
-    7. Извлечение доменов и IP-адресов
+    Парсинг структуры RFC 5322 + MIME.
+    Принимает строку с содержимым email и возвращает словарь с распарсенными данными.
     
     Args:
-        email_content: Содержимое email в одном из форматов:
-            - Путь к .eml файлу (str или Path)
-            - Текстовая строка с содержимым email (из CSV)
-            - Байтовая последовательность
+        email_string: Строка с содержимым .eml файла
         
     Returns:
-        dict: Словарь со всеми извлеченными данными:
-            - headers: заголовки email
-            - body: тело письма (text, html)
-            - multipart: информация о multipart структуре
-            - attachments_metadata: метаданные вложений
-            - attachment_hashes: SHA-256 хэши вложений
-            - urls: список извлеченных URL
-            - domains: домены и IP-адреса
-            - raw_parsed: исходный результат парсинга (для отладки)
-    
-    Raises:
-        ValueError: При критических ошибках парсинга
+        Dict с полями:
+        - from, to, reply_to, return_path, subject, date, message_id, references
+        - body_plain, body_html
+        - auth_results
+        - received_headers (list)
+        - attachments (list of dicts with 'name', 'type', 'size')
+        - urls (list)
+        - domains (list)
+        - ips (list)
     """
-    try:
-        # 1. Парсинг email через eml_parser
-        parsed = parse_eml(email_content)
-        
-        # 2. Извлечение всех компонентов
-        result = {
-            'headers': extract_headers(parsed),
-            'body': extract_body(parsed),
-            'multipart': extract_multipart(parsed),
-            'attachments_metadata': extract_attachments_metadata(parsed),
-            'attachment_hashes': compute_attachment_hashes(parsed),
-            'urls': extract_urls(parsed),
-            'domains': extract_domains(parsed),
-            'raw_parsed': parsed
-        }
-        
-        logger.info(
-            f"Email successfully parsed: "
-            f"headers={len(result['headers'])}, "
-            f"URLs={len(result['urls'])}, "
-            f"domains={len(result['domains']['domains'])}"
-        )
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Critical error parsing email: {e}")
-        raise
+    # Конвертация строки в bytes для парсинга
+    email_bytes = email_string.encode('utf-8', errors='replace')
+    
+    # Валидация формата
+    if not validate_eml_format(email_string):
+        raise ValueError("Provided content is not a valid .eml message")
+    
+    # Парсинг через стандартную библиотеку email.parser
+    parser = BytesParser(policy=default)
+    message = parser.parsebytes(email_bytes)
+    
+    if not message:
+        raise ValueError("Parser returned empty message")
+    
+    # Извлечение данных
+    headers = extract_headers(message)
+    body = extract_body(message)
+    urls = extract_urls(message, body=body)
+    attachments_metadata = extract_attachments_metadata(message)
+    domains_info = extract_domains(message, headers=headers, urls=urls)
+    
+    # Формирование результата в требуемом формате
+    result = {
+        'from': headers.get('from', ''),
+        'to': headers.get('to', ''),
+        'reply_to': headers.get('reply-to', ''),
+        'return_path': headers.get('return-path', ''),
+        'subject': headers.get('subject', ''),
+        'date': headers.get('date', ''),
+        'message_id': headers.get('message-id', ''),
+        'references': headers.get('references', ''),
+        'body_plain': body.get('text', ''),
+        'body_html': body.get('html', ''),
+        'auth_results': headers.get('authentication-results', ''),
+        'received_headers': headers.get('received', []),
+        'attachments': [
+            {
+                'name': att.get('filename', 'unknown'),
+                'type': att.get('content_type', ''),
+                'size': att.get('size', 0)
+            }
+            for att in attachments_metadata
+        ],
+        'urls': urls,
+        'domains': domains_info.get('domains', []),
+        'ips': domains_info.get('ips', [])
+    }
+    
+    return result
 
 
-# Для тестирования модуля
 if __name__ == "__main__":
-    # Настройка логирования для тестов
     logging.basicConfig(
         level=logging.DEBUG,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    
-    print("Email Parser Module - Fixed version")
-    print("Module ready to use")
+    print("Email Parser Module v2 - email.parser based")
+    print("="*60)
+    print("Features:")
+    print("  - RFC 5322/2045-2049 compliant")
+    print("  - Direct access to all headers including Content-Type")
+    print("  - Proper multipart handling (mixed/alternative/и )")
+    print("  - In-memory attachment processing with SHA-256 hashes")
+    print("  - URL and domain extraction")
+
