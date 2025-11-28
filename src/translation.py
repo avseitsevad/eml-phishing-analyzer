@@ -1,5 +1,5 @@
 """
-Модуль 5: Translation Module
+Translation Module
 Определение языка и машинный перевод
 """
 

@@ -81,19 +81,16 @@ class ThreatIntelligence:
         if not domain:
             return {'found': False, 'threat_type': 'clean', 'source': None}
         
-        # Нормализация домена
         try:
             extracted = tldextract.extract(domain)
             normalized_domain = f"{extracted.domain}.{extracted.suffix}".lower()
         except Exception:
             normalized_domain = domain.lower()
         
-        # Проверка кэша
         cache_key = f"domain:{normalized_domain}"
         if cache_key in self.cache:
             return self.cache[cache_key]
         
-        # Проверка в БД
         cursor = self.conn.cursor()
         cursor.execute("""
             SELECT threat_type, source 
@@ -168,7 +165,6 @@ class ThreatIntelligence:
         domain_in_urlhaus = False
         domain_in_openphish = False
         
-        # Нормализация всех доменов
         normalized = []
         for domain in domains:
             if not domain:
@@ -278,7 +274,7 @@ class ThreatIntelligence:
     
     def cache_results(self, key: str, result: dict):
         """
-        Кэширование результатов проверок для оптимизации производительности
+        Кэширование результатов проверок
         
         Args:
             key: ключ кэша

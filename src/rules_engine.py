@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 
 from .utils import DANGEROUS_EXTENSIONS
 
-# Веса правил (настраиваются)
+# Веса правил
 RULE_WEIGHTS = {
     'spf_fail': 15,
     'dkim_fail': 15,
@@ -130,7 +130,6 @@ def check_threat_intelligence(urls: list, domains: list, ips: list,
     score = 0
     found_items = []
     
-    # Проверка URL
     for url in urls or []:
         if not url:
             continue
@@ -140,7 +139,6 @@ def check_threat_intelligence(urls: list, domains: list, ips: list,
             score += RULE_WEIGHTS['url_in_ti_db']
             found_items.append(f"URL: {url} ({result.get('threat_type', 'malicious')})")
     
-    # Проверка доменов
     for domain in domains or []:
         if not domain:
             continue
@@ -150,7 +148,6 @@ def check_threat_intelligence(urls: list, domains: list, ips: list,
             score += RULE_WEIGHTS['domain_in_ti_db']
             found_items.append(f"Domain: {domain} ({result.get('threat_type', 'phishing')})")
     
-    # Проверка IP (используем тот же вес что и для URL)
     for ip in ips or []:
         if not ip:
             continue
@@ -255,13 +252,11 @@ def check_url_characteristics(url_analysis: dict) -> dict:
     shortener_detections = url_analyses.get('shortener_detections', [])
     ip_detections = url_analyses.get('ip_detections', [])
     
-    # Проверка URL shorteners
     if shortener_detections:
         triggered = True
         score += RULE_WEIGHTS['url_shortener'] * len(shortener_detections)
         details_parts.append(f'URL shorteners found: {len(shortener_detections)}')
     
-    # Проверка IP в URL
     if ip_detections:
         triggered = True
         score += RULE_WEIGHTS['ip_in_url'] * len(ip_detections)

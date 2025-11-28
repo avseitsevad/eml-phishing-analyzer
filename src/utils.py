@@ -69,7 +69,6 @@ def setup_logging(
     # Базовая конфигурация
     handlers = [logging.StreamHandler()]
     
-    # Добавляем файловый handler, если указан
     if log_file:
         log_file = Path(log_file)
         log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -80,10 +79,9 @@ def setup_logging(
         format=log_format,
         datefmt=date_format,
         handlers=handlers,
-        force=True  # Перезаписываем существующую конфигурацию
+        force=True
     )
     
-    # Устанавливаем уровень для сторонних библиотек
     logging.getLogger('urllib3').setLevel(logging.WARNING)
     logging.getLogger('requests').setLevel(logging.WARNING)
 
@@ -150,18 +148,15 @@ def validate_eml_format(email_content: Union[str, bytes]) -> bool:
         bool: True если формат валиден, False иначе
     """
     try:
-        # Преобразуем в строку, если это байты
         if isinstance(email_content, bytes):
             email_content = decode_text(email_content)
         
         if not email_content or not email_content.strip():
             return False
         
-        # Проверка минимальной длины
         if len(email_content) <= 50:
             return False
         
-        # Базовые проверки RFC 5322
         lines = email_content.split('\n')
         
         # Должны быть заголовки
@@ -176,11 +171,9 @@ def validate_eml_format(email_content: Union[str, bytes]) -> bool:
                     has_headers = True
                 break
             
-            # Проверка формата заголовка (ключ: значение)
             if ':' in line:
                 has_headers = True
             elif not line.startswith(' ') and not line.startswith('\t'):
-                # Если строка не является продолжением заголовка
                 if has_headers:
                     header_end = True
                     break
@@ -198,6 +191,44 @@ def validate_eml_format(email_content: Union[str, bytes]) -> bool:
     except Exception as e:
         logging.warning(f"Ошибка при валидации .eml формата: {e}")
         return False
+
+
+def _decode_with_encoding(
+    text: Union[str, bytes],
+    encodings: list
+) -> tuple[str, str]:
+    """
+    Внутренняя функция для декодирования текста с возвратом текста и кодировки.
+    
+    Args:
+        text: Текст для декодирования (строка или байты)
+        encodings: Список кодировок для попытки декодирования
+        
+    Returns:
+        tuple: (декодированный_текст, найденная_кодировка)
+    """
+    if isinstance(text, str):
+        return text, 'utf-8'
+    
+    if isinstance(text, bytes):
+        for encoding in encodings:
+            try:
+                decoded = text.decode(encoding)
+                return decoded, encoding
+            except (UnicodeDecodeError, LookupError):
+                continue
+        
+        for encoding in encodings:
+            try:
+                decoded = text.decode(encoding, errors='replace')
+                logging.warning(f"Декодирование с заменой ошибок в {encoding}")
+                return decoded, encoding
+            except LookupError:
+                continue
+        
+        return text.decode('utf-8', errors='replace'), 'utf-8'
+    
+    return str(text), 'utf-8'
 
 
 def decode_text(
@@ -218,33 +249,8 @@ def decode_text(
     Raises:
         UnicodeDecodeError: Если не удалось декодировать ни в одной кодировке
     """
-    # Если уже строка, возвращаем как есть
-    if isinstance(text, str):
-        return text
-    
-    # Если байты, пробуем декодировать
-    if isinstance(text, bytes):
-        for encoding in encodings:
-            try:
-                decoded = text.decode(encoding)
-                return decoded
-            except (UnicodeDecodeError, LookupError):
-                continue
-        
-        # Если не удалось декодировать, пробуем с обработкой ошибок
-        for encoding in encodings:
-            try:
-                decoded = text.decode(encoding, errors='replace')
-                logging.warning(f"Декодирование с заменой ошибок в {encoding}")
-                return decoded
-            except LookupError:
-                continue
-        
-        # Последняя попытка - UTF-8 с заменой ошибок
-        return text.decode('utf-8', errors='replace')
-    
-    # Если другой тип, преобразуем в строку
-    return str(text)
+    decoded, _ = _decode_with_encoding(text, encodings)
+    return decoded
 
 
 def handle_encoding(
@@ -261,33 +267,7 @@ def handle_encoding(
     Returns:
         tuple: (декодированный_текст, найденная_кодировка)
     """
-    # Если уже строка, возвращаем как есть
-    if isinstance(text, str):
-        return text, 'utf-8'
-    
-    # Если байты, пробуем декодировать
-    if isinstance(text, bytes):
-        for encoding in encodings:
-            try:
-                decoded = text.decode(encoding)
-                return decoded, encoding
-            except (UnicodeDecodeError, LookupError):
-                continue
-        
-        # Если не удалось декодировать, пробуем с обработкой ошибок
-        for encoding in encodings:
-            try:
-                decoded = text.decode(encoding, errors='replace')
-                logging.warning(f"Декодирование с заменой ошибок в {encoding}")
-                return decoded, encoding
-            except LookupError:
-                continue
-        
-        # Последняя попытка - UTF-8 с заменой ошибок
-        return text.decode('utf-8', errors='replace'), 'utf-8'
-    
-    # Если другой тип, преобразуем в строку
-    return str(text), 'utf-8'
+    return _decode_with_encoding(text, encodings)
 
 
 def timing_decorator(func: Callable) -> Callable:
@@ -345,9 +325,5 @@ DANGEROUS_EXTENSIONS = {
 URL_SHORTENERS = {
     'bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly', 
     'cutt.ly', 'rb.gy', 'j.mp', 'tiny.cc', 'short.link',
-    'is.gd', 'buff.ly', 'rebrand.ly', 'bitly.com'
+    'is.gd', 'buff.ly', 'rebrand.ly',     'bitly.com'
 }
-
-# Инициализация логирования при импорте модуля (опционально)
-# Можно вызвать setup_logging() явно в главном модуле
-# setup_logging()

@@ -7,7 +7,7 @@ import re
 from typing import Dict, List, Any
 
 
-# Компилированные регулярные выражения для оптимизации
+# Компилированные регулярные выражения 
 IP_PATTERN = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
 DOMAIN_PATTERN = re.compile(r'@([a-zA-Z0-9._-]+\.[a-zA-Z]{2,})')
 SPF_PATTERN = re.compile(r'spf=(\w+)', re.IGNORECASE)
@@ -172,7 +172,7 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
     # Парсинг Authentication-Results
     auth_results = headers.get('authentication-results', '')
     if not auth_results:
-        auth_results = headers.get('auth_results', '')  # Альтернативное имя
+        auth_results = headers.get('auth_results', '')
     
     auth_data = parse_authentication_results(auth_results)
     result['spf_result'] = auth_data.get('spf', 'none')
@@ -183,22 +183,20 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
     from_addr = headers.get('from', '')
     reply_to = headers.get('reply-to', '')
     if not reply_to:
-        reply_to = headers.get('reply_to', '')  # Альтернативное имя
+        reply_to = headers.get('reply_to', '')
     
     return_path = headers.get('return-path', '')
     if not return_path:
-        return_path = headers.get('return_path', '')  # Альтернативное имя
+        return_path = headers.get('return_path', '')
     
     result['from_domain'] = extract_domain(from_addr)
     result['reply_to_domain'] = extract_domain(reply_to) if reply_to else ''
     result['return_path_domain'] = extract_domain(return_path) if return_path else ''
     
-    # Извлечение IP-адресов и подсчет количества Received headers
     received_headers = headers.get('received', [])
     if not received_headers:
-        received_headers = headers.get('received_headers', [])  # Альтернативное имя
+        received_headers = headers.get('received_headers', [])
     
-    # Нормализация received_headers: если не список, преобразуем в список
     if not isinstance(received_headers, list):
         received_headers = [received_headers] if received_headers else []
     

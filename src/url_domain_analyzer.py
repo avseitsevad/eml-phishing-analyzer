@@ -1,13 +1,10 @@
 """
 URL&Domain Analyzer Module
-Анализирует URL-адреса и домены, извлеч енные из email_parser.py:
+Анализирует URL-адреса и домены, извлеченные из email_parser.py:
 - Эвристический анализ доменов: длина, TLD
 - Детектирование IP-адреса вместо домена в URL
 - Обнаружение URL-shorteners
 - Выход: эвристические признаки и веса для каждого домена и URL
-
-Примечание: Модуль не извлекает URL/домены/IP, а только анализирует уже извлеченные данные.
-Используйте email_parser.py для извлечения данных из email.
 """
 
 import re
@@ -85,7 +82,6 @@ def detect_ip_in_url(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
     # Берем первый найденный IP
     ip = matches[0]
     
-    # Валидация IP
     parts = ip.split('.')
     if len(parts) != 4 or not all(0 <= int(part) <= 255 for part in parts if part.isdigit()):
         return False, None, {
@@ -94,7 +90,6 @@ def detect_ip_in_url(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
             'invalid': True
         }
     
-    # Проверка на приватный IP (исключение)
     is_private = is_private_ip(ip)
     
     details = {
@@ -105,7 +100,6 @@ def detect_ip_in_url(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
     }
     
     if is_private:
-        # Приватные IP не считаются подозрительными
         return False, ip, details
     
     return True, ip, details
@@ -127,11 +121,9 @@ def detect_url_shorteners(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
         
-        # Удаление порта, если есть
         if ':' in domain:
             domain = domain.split(':')[0]
         
-        # Проверка на точное совпадение или поддомен
         for shortener in SHORTENER_DOMAINS:
             if domain == shortener or domain.endswith(f'.{shortener}'):
                 return True, shortener, {
