@@ -27,7 +27,14 @@ for resource in ['tokenizers/punkt', 'corpora/stopwords', 'corpora/wordnet']:
 lemmatizer = WordNetLemmatizer()
 STOP_WORDS = set(stopwords.words('english'))
 
-from utils import DANGEROUS_EXTENSIONS, URL_SHORTENERS
+from .utils import URL_SHORTENERS
+
+# Опасные расширения файлов
+DANGEROUS_EXTENSIONS = {
+    '.exe', '.scr', '.bat', '.cmd', '.com', '.pif', '.vbs', '.js',
+    '.jar', '.app', '.deb', '.pkg', '.dmg', '.msi', '.dll', '.lnk',
+    '.hta', '.wsf', '.ps1', '.sh', '.run', '.bin'
+}
 
 # Ключевые слова срочности
 URGENCY_KEYWORDS = {

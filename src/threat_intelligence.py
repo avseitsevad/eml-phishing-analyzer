@@ -7,7 +7,8 @@ import sqlite3
 import logging
 from pathlib import Path
 from typing import Dict, Optional, List, Any
-import tldextract
+
+from .utils import normalize_domain_for_ti
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -81,10 +82,8 @@ class ThreatIntelligence:
         if not domain:
             return {'found': False, 'threat_type': 'clean', 'source': None}
         
-        try:
-            extracted = tldextract.extract(domain)
-            normalized_domain = f"{extracted.domain}.{extracted.suffix}".lower()
-        except Exception:
+        normalized_domain = normalize_domain_for_ti(domain)
+        if not normalized_domain:
             normalized_domain = domain.lower()
         
         cache_key = f"domain:{normalized_domain}"
@@ -169,13 +168,9 @@ class ThreatIntelligence:
         for domain in domains:
             if not domain:
                 continue
-            try:
-                extracted = tldextract.extract(domain)
-                normalized_domain = f"{extracted.domain}.{extracted.suffix}".lower()
-                if normalized_domain and normalized_domain != '.':
-                    normalized.append((domain, normalized_domain))
-            except Exception:
-                continue
+            normalized_domain = normalize_domain_for_ti(domain)
+            if normalized_domain:
+                normalized.append((domain, normalized_domain))
         
         if not normalized:
             return {
@@ -233,11 +228,16 @@ class ThreatIntelligence:
         Главная функция для RuleEngine
         
         Args:
-            domains: parsed_email['domains']['domains']
-            ips: parsed_email['domains']['ips'] + header_analysis['received_ips']
+            domains: список доменов из parsed_email['domains']
+            ips: список IP из parsed_email['ips']
             
         Returns:
-            dict для RuleEngine
+            dict для RuleEngine с полями:
+            - malicious_domains: list[str]
+            - malicious_ips: list[str]
+            - domain_in_urlhaus: bool
+            - domain_in_openphish: bool
+            - ip_in_blacklist: bool
         """
         # Валидация
         domains = domains or []

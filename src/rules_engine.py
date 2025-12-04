@@ -3,10 +3,8 @@ Rules Engine Module
 Эвристические правила и формирование risk score
 """
 
-import re
-from typing import List, Dict, Any
-
-from .utils import DANGEROUS_EXTENSIONS
+# Константы для правил
+RECEIVED_HOPS_THRESHOLD = 10
 
 # Веса правил
 RULE_WEIGHTS = {
@@ -14,12 +12,10 @@ RULE_WEIGHTS = {
     'dkim_fail': 15,
     'dmarc_fail': 10,
     'domain_mismatch': 20,
-    'url_in_ti_db': 25,
     'domain_in_ti_db': 25,
+    'ip_in_ti_db': 25,
     'reply_anomaly': 10,
-    'dangerous_attachment': 20,
-    'url_shortener': 10,
-    'ip_in_url': 15
+    'received_hops_anomaly': 15,
 }
 
 
@@ -105,57 +101,46 @@ def check_domain_mismatch(header_analysis: dict) -> dict:
     }
 
 
-def check_threat_intelligence(urls: list, domains: list, ips: list,
-                               ti_module) -> dict:
+def check_threat_intelligence(ti_results: dict) -> dict:
     """
-    Проверка репутации извлеченных RLU, доменов и IP по локальной TI-базе
+    Проверка репутации на основе готовых результатов TI
     
     Args:
-        urls: список URL
-        domains: список доменов
-        ips: список IP-адресов
-        ti_module: экземпляр ThreatIntelligence
+        ti_results: результат ti_module.check_reputation() с полями:
+            - malicious_domains: list[str]
+            - malicious_ips: list[str]
+            - domain_in_urlhaus: bool
+            - domain_in_openphish: bool
+            - ip_in_blacklist: bool
         
     Returns:
         dict: результаты проверки репутации
     """
-    if not ti_module:
+    if not ti_results:
         return {
             'triggered': False,
             'score': 0,
-            'details': 'TI module not available'
+            'details': 'TI results not available'
         }
     
-    triggered = False
+    malicious_domains = ti_results.get('malicious_domains', [])
+    malicious_ips = ti_results.get('malicious_ips', [])
+    
+    triggered = bool(malicious_domains or malicious_ips)
     score = 0
     found_items = []
     
-    for url in urls or []:
-        if not url:
-            continue
-        result = ti_module.check_url_reputation(url)
-        if result.get('found'):
-            triggered = True
-            score += RULE_WEIGHTS['url_in_ti_db']
-            found_items.append(f"URL: {url} ({result.get('threat_type', 'malicious')})")
-    
-    for domain in domains or []:
-        if not domain:
-            continue
-        result = ti_module.check_domain_reputation(domain)
-        if result.get('found'):
-            triggered = True
+    # Проверка доменов
+    for domain in malicious_domains:
+        if domain:
             score += RULE_WEIGHTS['domain_in_ti_db']
-            found_items.append(f"Domain: {domain} ({result.get('threat_type', 'phishing')})")
+            found_items.append(f"Domain: {domain}")
     
-    for ip in ips or []:
-        if not ip:
-            continue
-        result = ti_module.check_ip_reputation(ip)
-        if result.get('found'):
-            triggered = True
-            score += RULE_WEIGHTS['url_in_ti_db']
-            found_items.append(f"IP: {ip} ({result.get('threat_type', 'malicious')})")
+    # Проверка IP-адресов
+    for ip in malicious_ips:
+        if ip:
+            score += RULE_WEIGHTS['ip_in_ti_db']
+            found_items.append(f"IP: {ip}")
     
     details = '; '.join(found_items) if found_items else 'No threats found in TI database'
     
@@ -190,84 +175,29 @@ def check_reply_anomaly(header_analysis: dict) -> dict:
     }
 
 
-def check_dangerous_attachments(attachments: list) -> dict:
+def check_received_hops_anomaly(header_analysis: dict) -> dict:
     """
-    Проверка характеристик вложений (опасные расширения: .exe, .scr, .bat и т.д.)
+    Проверка аномально большого количества хопов в заголовках Received
     
     Args:
-        attachments: список вложений (словари с ключом 'filename')
+        header_analysis: результат analyze_headers() из header_analyzer
         
     Returns:
         dict: результат проверки
     """
-    if not attachments:
-        return {
-            'triggered': False,
-            'score': 0,
-            'details': 'No attachments found'
-        }
+    received_count = header_analysis.get('received_count', 0)
     
-    dangerous_files = []
-    
-    for attachment in attachments:
-        filename = attachment.get('filename', '') if isinstance(attachment, dict) else str(attachment)
-        if not filename:
-            continue
-        
-        filename_lower = filename.lower()
-        for ext in DANGEROUS_EXTENSIONS:
-            if filename_lower.endswith(ext):
-                dangerous_files.append(filename)
-                break
-    
-    if dangerous_files:
+    if received_count > RECEIVED_HOPS_THRESHOLD:
         return {
             'triggered': True,
-            'score': RULE_WEIGHTS['dangerous_attachment'],
-            'details': f'Dangerous attachments: {", ".join(dangerous_files)}'
+            'score': RULE_WEIGHTS['received_hops_anomaly'],
+            'details': f'Anomalous number of Received hops: {received_count} (threshold: {RECEIVED_HOPS_THRESHOLD})'
         }
     
     return {
         'triggered': False,
         'score': 0,
-        'details': 'No dangerous attachments found'
-    }
-
-
-def check_url_characteristics(url_analysis: dict) -> dict:
-    """
-    Проверка характеристик URL (shorteners, IP в URL)
-    
-    Args:
-        url_analysis: результат analyze_urls_and_domains() из url_domain_analyzer
-        
-    Returns:
-        dict: результат проверки
-    """
-    triggered = False
-    score = 0
-    details_parts = []
-    
-    url_analyses = url_analysis.get('url_analyses', {})
-    shortener_detections = url_analyses.get('shortener_detections', [])
-    ip_detections = url_analyses.get('ip_detections', [])
-    
-    if shortener_detections:
-        triggered = True
-        score += RULE_WEIGHTS['url_shortener'] * len(shortener_detections)
-        details_parts.append(f'URL shorteners found: {len(shortener_detections)}')
-    
-    if ip_detections:
-        triggered = True
-        score += RULE_WEIGHTS['ip_in_url'] * len(ip_detections)
-        details_parts.append(f'IP addresses in URLs: {len(ip_detections)}')
-    
-    details = '; '.join(details_parts) if details_parts else 'No suspicious URL characteristics'
-    
-    return {
-        'triggered': triggered,
-        'score': score,
-        'details': details
+        'details': f'Received hops count: {received_count} (normal)'
     }
 
 
@@ -276,7 +206,7 @@ def calculate_risk_score(triggered_rules: list) -> int:
     Формирование risk score (0-100) на основе сработавших правил с весовыми коэффициентами
     
     Args:
-        triggered_rules: список сработавших правил с их весами (список словарей с ключами 'rule' и 'weight')
+        triggered_rules: список сработавших правил с их весами (список словарей с ключами 'rule_name' и 'weight')
         
     Returns:
         int: risk score (0-100)
@@ -288,8 +218,6 @@ def calculate_risk_score(triggered_rules: list) -> int:
     for rule in triggered_rules:
         if isinstance(rule, dict):
             weight = rule.get('weight', 0)
-        elif isinstance(rule, str) and rule in RULE_WEIGHTS:
-            weight = RULE_WEIGHTS[rule]
         else:
             weight = 0
         total_score += weight
@@ -315,68 +243,82 @@ def classify_risk_level(risk_score: int) -> str:
         return 'HIGH'
 
 
-def evaluate_all_rules(header_analysis: dict, url_analysis: dict, 
-                       parsed_email: dict, ti_module) -> dict:
+def evaluate_all_rules(header_analysis: dict, parsed_email: dict, 
+                       ti_results: dict) -> dict:
     """
     Главная функция для оценки всех правил
     
     Args:
         header_analysis: результат analyze_headers() из header_analyzer
-        url_analysis: результат analyze_urls_and_domains() из url_domain_analyzer
         parsed_email: результат parse_email() из email_parser
-        ti_module: экземпляр ThreatIntelligence
+        ti_results: результат ti_module.check_reputation() из threat_intelligence
         
     Returns:
         dict: {
-            'risk_score': int,
-            'risk_level': str,
-            'triggered_rules': list,
+            'risk_score': int,              # 0-100
+            'risk_level': str,              # 'LOW'/'MEDIUM'/'HIGH'
+            'triggered_rules': [
+                {
+                    'rule_name': str,
+                    'weight': int,
+                    'description': str
+                }
+            ],
             'rule_details': dict
         }
     """
     triggered_rules = []
     rule_details = {}
     
-    # Authentication
+    # 1. Authentication (SPF/DKIM/DMARC)
     auth_result = check_authentication(header_analysis)
     if auth_result['triggered']:
-        triggered_rules.append({'rule': 'authentication', 'weight': auth_result['score']})
+        triggered_rules.append({
+            'rule_name': 'authentication',
+            'weight': auth_result['score'],
+            'description': auth_result['details']
+        })
     rule_details['authentication'] = auth_result
     
-    # Domain mismatch
+    # 2. Domain mismatch (From/Reply-To/Return-Path)
     domain_result = check_domain_mismatch(header_analysis)
     if domain_result['triggered']:
-        triggered_rules.append({'rule': 'domain_mismatch', 'weight': domain_result['score']})
+        triggered_rules.append({
+            'rule_name': 'domain_mismatch',
+            'weight': domain_result['score'],
+            'description': domain_result['details']
+        })
     rule_details['domain_mismatch'] = domain_result
     
-    # Reply anomaly
+    # 3. Reply anomaly ("Re:" без References)
     reply_result = check_reply_anomaly(header_analysis)
     if reply_result['triggered']:
-        triggered_rules.append({'rule': 'reply_anomaly', 'weight': reply_result['score']})
+        triggered_rules.append({
+            'rule_name': 'reply_anomaly',
+            'weight': reply_result['score'],
+            'description': reply_result['details']
+        })
     rule_details['reply_anomaly'] = reply_result
     
-    # Threat Intelligence
-    urls = parsed_email.get('urls', [])
-    domains = parsed_email.get('domains', [])
-    ips = parsed_email.get('ips', [])
+    # 4. Received: аномально большое кол-во хопов
+    hops_result = check_received_hops_anomaly(header_analysis)
+    if hops_result['triggered']:
+        triggered_rules.append({
+            'rule_name': 'received_hops_anomaly',
+            'weight': hops_result['score'],
+            'description': hops_result['details']
+        })
+    rule_details['received_hops_anomaly'] = hops_result
     
-    ti_result = check_threat_intelligence(urls, domains, ips, ti_module)
+    # 5. TI reputation (domains/IPs)
+    ti_result = check_threat_intelligence(ti_results)
     if ti_result['triggered']:
-        triggered_rules.append({'rule': 'threat_intelligence', 'weight': ti_result['score']})
+        triggered_rules.append({
+            'rule_name': 'threat_intelligence',
+            'weight': ti_result['score'],
+            'description': ti_result['details']
+        })
     rule_details['threat_intelligence'] = ti_result
-    
-    # Dangerous attachments
-    attachments = parsed_email.get('attachments_metadata', [])
-    attach_result = check_dangerous_attachments(attachments)
-    if attach_result['triggered']:
-        triggered_rules.append({'rule': 'dangerous_attachment', 'weight': attach_result['score']})
-    rule_details['dangerous_attachments'] = attach_result
-    
-    # URL characteristics
-    url_char_result = check_url_characteristics(url_analysis)
-    if url_char_result['triggered']:
-        triggered_rules.append({'rule': 'url_characteristics', 'weight': url_char_result['score']})
-    rule_details['url_characteristics'] = url_char_result
     
     # Calculate risk score
     risk_score = calculate_risk_score(triggered_rules)

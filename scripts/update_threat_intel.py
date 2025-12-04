@@ -17,7 +17,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.threat_intelligence import ThreatIntelligence
-from src.utils import extract_hostname_from_url, normalize_domain
+from src.utils import extract_hostname_from_url, normalize_domain, normalize_domain_for_ti
 
 # Настройка логирования
 logging.basicConfig(

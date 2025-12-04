@@ -102,8 +102,6 @@ def extract_hostname_from_url(url: str) -> Tuple[Optional[str], bool]:
     Returns:
         tuple: (hostname, is_ip) где is_ip=True если hostname это IP-адрес
     """
-    ip_pattern = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
-    
     try:
         parsed = urlparse(url)
         hostname = parsed.netloc or (parsed.path.split('/')[0] if parsed.path else None)
@@ -115,7 +113,7 @@ def extract_hostname_from_url(url: str) -> Tuple[Optional[str], bool]:
         hostname = hostname.rsplit(':', 1)[0] if ':' in hostname else hostname
         
         # Проверяем, является ли IP-адресом
-        is_ip = bool(ip_pattern.match(hostname))
+        is_ip = bool(IP_PATTERN.match(hostname))
         return hostname, is_ip
     except Exception:
         return None, False
@@ -132,6 +130,28 @@ def normalize_domain(hostname: str) -> Optional[str]:
     """
     try:
         extracted = tldextract.extract(hostname)
+        normalized = f"{extracted.domain}.{extracted.suffix}".lower()
+        return normalized if normalized and normalized != '.' else None
+    except Exception:
+        return None
+
+
+def normalize_domain_for_ti(domain: str) -> Optional[str]:
+    """
+    Нормализует домен для Threat Intelligence проверки.
+    Возвращает domain.suffix в нижнем регистре.
+    
+    Args:
+        domain: домен для нормализации
+    
+    Returns:
+        str: нормализованный домен (domain.suffix) или None
+    """
+    if not domain:
+        return None
+    
+    try:
+        extracted = tldextract.extract(domain)
         normalized = f"{extracted.domain}.{extracted.suffix}".lower()
         return normalized if normalized and normalized != '.' else None
     except Exception:
@@ -315,15 +335,13 @@ def save_results(results: dict, output_path: Union[str, Path]) -> None:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
 
-# Общие константы для проекта
-DANGEROUS_EXTENSIONS = {
-    '.exe', '.scr', '.bat', '.cmd', '.com', '.pif', '.vbs', '.js',
-    '.jar', '.app', '.deb', '.pkg', '.dmg', '.msi', '.dll', '.lnk',
-    '.hta', '.wsf', '.ps1', '.sh', '.run', '.bin'
-}
-
+# Общие константы для проекта (используются в 2+ модулях)
 URL_SHORTENERS = {
     'bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly', 
     'cutt.ly', 'rb.gy', 'j.mp', 'tiny.cc', 'short.link',
-    'is.gd', 'buff.ly', 'rebrand.ly',     'bitly.com'
+    'is.gd', 'buff.ly', 'rebrand.ly', 'bitly.com'
 }
+
+# Регулярные выражения для парсинга
+IP_PATTERN = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+EMAIL_DOMAIN_PATTERN = re.compile(r'@([a-zA-Z0-9._-]+\.[a-zA-Z]{2,})', re.IGNORECASE)

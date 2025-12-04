@@ -28,13 +28,20 @@ from email.policy import default
 from email.message import EmailMessage
 from bs4 import BeautifulSoup
 from urlextract import URLExtract
-from utils import (
+from .utils import (
     timing_decorator,
     validate_eml_format,
     extract_hostname_from_url,
-    normalize_domain
+    normalize_domain,
+    decode_text,
+    IP_PATTERN,
+    EMAIL_DOMAIN_PATTERN
 )
 import tldextract
+
+# Регулярные выражения для парсинга доменов
+DOMAIN_PATTERN = re.compile(r'^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$', re.IGNORECASE)
+RECEIVED_DOMAIN_PATTERN = re.compile(r'from\s+((?:[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,})', re.IGNORECASE)
 
 
 url_extractor = URLExtract()
@@ -85,22 +92,6 @@ def load_eml_file(file_input: Union[str, Path, Any]) -> str:
         raise ValueError("Provided content is not a valid .eml message")
     
     return content_str
-
-
-def decode_text(content: Union[str, bytes]) -> str:
-    """Универсальная функция декодирования текста с поддержкой UTF-8, Windows-1251, KOI8-R"""
-    if isinstance(content, str):
-        return content
-    if not isinstance(content, bytes):
-        return str(content)
-    
-    for encoding in ['utf-8', 'windows-1251', 'koi8-r']:
-        try:
-            return content.decode(encoding)
-        except (UnicodeDecodeError, AttributeError):
-            continue
-    
-    return content.decode('utf-8', errors='ignore')
 
 
 def extract_headers(message: EmailMessage) -> Dict[str, Any]:
@@ -258,10 +249,6 @@ def extract_domains(
     ips: List[str] = []
     
     remove_www = lambda d: d[4:] if d and d.lower().startswith('www.') else d
-    ip_pattern = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
-    domain_pattern = re.compile(r'^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$', re.IGNORECASE)
-    email_pattern = re.compile(r'@([a-zA-Z0-9._-]+\.[a-zA-Z]{2,})', re.IGNORECASE)
-    received_pattern = re.compile(r'from\s+((?:[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,})', re.IGNORECASE)
     
     # 1. Из URL в теле письма
     if urls is None:
@@ -278,7 +265,7 @@ def extract_domains(
             ips.append(hostname)
             continue
         
-        if domain_pattern.match(hostname) or re.match(r'^[a-z0-9\.\-]+$', hostname, re.IGNORECASE):
+        if DOMAIN_PATTERN.match(hostname) or re.match(r'^[a-z0-9\.\-]+$', hostname, re.IGNORECASE):
             domains.append(hostname)
             normalized = normalize_domain(hostname)
             if normalized and normalized != hostname:
@@ -289,11 +276,11 @@ def extract_domains(
         headers = extract_headers(message)
     for field in ['from', 'to', 'reply-to', 'return-path']:
         if header_value := headers.get(field, ''):
-            for match in email_pattern.finditer(header_value):
+            for match in EMAIL_DOMAIN_PATTERN.finditer(header_value):
                 email_domain = match.group(1)
-                if email_domain and not ip_pattern.match(email_domain):
+                if email_domain and not IP_PATTERN.match(email_domain):
                     domains.append(remove_www(email_domain.lower()))
-            ips.extend(ip_pattern.findall(header_value))
+            ips.extend(IP_PATTERN.findall(header_value))
     
     # 3. Из заголовков Received
     received_headers = headers.get('received', [])
@@ -302,11 +289,11 @@ def extract_domains(
     
     for received in received_headers:
         received_str = str(received)
-        for match in received_pattern.finditer(received_str):
+        for match in RECEIVED_DOMAIN_PATTERN.finditer(received_str):
             domain = match.group(1)
-            if domain and not ip_pattern.match(domain):
+            if domain and not IP_PATTERN.match(domain):
                 domains.append(remove_www(domain.lower()))
-        ips.extend(ip_pattern.findall(received_str))
+        ips.extend(IP_PATTERN.findall(received_str))
     
     # 4. Валидация IP-адресов
     valid_ips = []

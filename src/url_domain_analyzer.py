@@ -13,12 +13,16 @@ from typing import Dict, List, Optional, Tuple, Any
 import tldextract
 from urllib.parse import urlparse
 
-from .utils import timing_decorator, URL_SHORTENERS
+from .utils import (
+    timing_decorator,
+    URL_SHORTENERS,
+    IP_PATTERN
+)
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
 
-# Список подозрительных TLD
+# Константы для анализа доменов
 SUSPICIOUS_TLDS = {
     '.xin', '.win', '.help', '.bond', '.cfd', '.finance',
     '.top', '.xyz', '.icu', '.support', '.vip', '.pro', '.sbs',
@@ -70,8 +74,7 @@ def detect_ip_in_url(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
     Returns:
         tuple: (найден_IP, IP_адрес, детали)
     """
-    ip_pattern = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
-    matches = ip_pattern.findall(url)
+    matches = IP_PATTERN.findall(url)
     
     if not matches:
         return False, None, {
@@ -191,22 +194,25 @@ def has_shortened_url(urls: List[str]) -> bool:
 def _extract_entities(parsed_email_data: Dict[str, Any]) -> Tuple[List[str], List[str], List[str]]:
     """
     Извлекает списки URL, доменов и IP из результата email_parser.parse_email().
+    
+    email_parser.parse_email() возвращает:
+    - 'urls': список строк
+    - 'domains': список строк
+    - 'ips': список строк
     """
     urls = parsed_email_data.get('urls', []) or []
-    domains_field = parsed_email_data.get('domains', []) or []
-    ips_field = parsed_email_data.get('ips', []) or []
-
-    if isinstance(domains_field, dict):
-        domains = domains_field.get('domains', []) or []
-        ips = domains_field.get('ips', []) or []
-    else:
-        domains = domains_field
-        if isinstance(ips_field, dict):
-            ips = ips_field.get('ips', []) or []
-        else:
-            ips = ips_field
-
-    return list(domains), list(urls), list(ips)
+    domains = parsed_email_data.get('domains', []) or []
+    ips = parsed_email_data.get('ips', []) or []
+    
+    # Гарантируем, что это списки
+    if not isinstance(domains, list):
+        domains = []
+    if not isinstance(urls, list):
+        urls = []
+    if not isinstance(ips, list):
+        ips = []
+    
+    return domains, urls, ips
 
 
 @timing_decorator

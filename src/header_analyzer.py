@@ -4,12 +4,11 @@ Header Analyzer Module
 """
 
 import re
-from typing import Dict, List, Any
+from typing import Dict, Any
 
+from .utils import EMAIL_DOMAIN_PATTERN
 
-# Компилированные регулярные выражения 
-IP_PATTERN = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
-DOMAIN_PATTERN = re.compile(r'@([a-zA-Z0-9._-]+\.[a-zA-Z]{2,})')
+# Компилированные регулярные выражения для парсинга Authentication-Results
 SPF_PATTERN = re.compile(r'spf=(\w+)', re.IGNORECASE)
 DKIM_PATTERN = re.compile(r'dkim=(\w+)', re.IGNORECASE)
 DMARC_PATTERN = re.compile(r'dmarc=(\w+)', re.IGNORECASE)
@@ -29,7 +28,7 @@ def extract_domain(address: str) -> str:
     if not address:
         return ''
     
-    match = DOMAIN_PATTERN.search(address)
+    match = EMAIL_DOMAIN_PATTERN.search(address)
     return match.group(1).lower() if match else ''
 
 
@@ -72,46 +71,6 @@ def parse_authentication_results(auth_results: str) -> Dict[str, str]:
     return result
 
 
-def extract_received_ips(received_headers: Any) -> List[str]:
-    """
-    Извлечение IP-адресов из заголовков Received
-    
-    Args:
-        received_headers: список заголовков Received или одиночное значение
-    
-    Returns:
-        list[str]: список уникальных IP-адресов
-    """
-    if not received_headers:
-        return []
-    
-    # Нормализация: если не список, преобразуем в список
-    if not isinstance(received_headers, list):
-        received_headers = [received_headers]
-    
-    ips = []
-    for received in received_headers:
-        if received:  # Проверка на None и пустые значения
-            received_str = str(received)
-            found_ips = IP_PATTERN.findall(received_str)
-            ips.extend(found_ips)
-    
-    # Валидация IP-адресов и удаление дубликатов
-    valid_ips = []
-    seen = set()
-    for ip in ips:
-        parts = ip.split('.')
-        if len(parts) == 4 and ip not in seen:
-            try:
-                if all(0 <= int(part) <= 255 for part in parts):
-                    valid_ips.append(ip)
-                    seen.add(ip)
-            except ValueError:
-                continue
-    
-    return valid_ips
-
-
 def check_reply_without_references(subject: str, references: str) -> bool:
     """
     Проверка структурной аномалии: наличие "Re:" в Subject при отсутствии References
@@ -141,7 +100,7 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
     НЕ принимает решений, НЕ считает баллы, НЕ формирует вердикты. Только извлекает факты.
     
     Args:
-        headers: словарь с полями заголовков 
+        headers: словарь с полями заголовков из email_parser.parse_email() 
         
     Returns:
         dict: плоский словарь с извлеченными фактами:
@@ -152,7 +111,6 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
             'from_domain': str,
             'reply_to_domain': str,
             'return_path_domain': str,
-            'received_ips': list[str],
             'received_count': int,
             'has_re_without_references': bool
         }
@@ -164,16 +122,12 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
         'from_domain': '',
         'reply_to_domain': '',
         'return_path_domain': '',
-        'received_ips': [],
         'received_count': 0,
         'has_re_without_references': False
     }
     
     # Парсинг Authentication-Results
-    auth_results = headers.get('authentication-results', '')
-    if not auth_results:
-        auth_results = headers.get('auth_results', '')
-    
+    auth_results = headers.get('auth_results', '')
     auth_data = parse_authentication_results(auth_results)
     result['spf_result'] = auth_data.get('spf', 'none')
     result['dkim_result'] = auth_data.get('dkim', 'none')
@@ -181,13 +135,8 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
     
     # Извлечение доменов из From/Reply-To/Return-Path
     from_addr = headers.get('from', '')
-    reply_to = headers.get('reply-to', '')
-    if not reply_to:
-        reply_to = headers.get('reply_to', '')
-    
-    return_path = headers.get('return-path', '')
-    if not return_path:
-        return_path = headers.get('return_path', '')
+    reply_to = headers.get('reply_to', '')
+    return_path = headers.get('return_path', '')
     
     result['from_domain'] = extract_domain(from_addr)
     result['reply_to_domain'] = extract_domain(reply_to) if reply_to else ''
@@ -200,7 +149,6 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(received_headers, list):
         received_headers = [received_headers] if received_headers else []
     
-    result['received_ips'] = extract_received_ips(received_headers)
     result['received_count'] = len(received_headers)
     
     # Проверка структурной аномалии: "Re:" в Subject при отсутствии References
