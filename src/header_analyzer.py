@@ -142,12 +142,10 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
     result['reply_to_domain'] = extract_domain(reply_to) if reply_to else ''
     result['return_path_domain'] = extract_domain(return_path) if return_path else ''
     
-    received_headers = headers.get('received', [])
-    if not received_headers:
-        received_headers = headers.get('received_headers', [])
-    
+    # email_parser.parse_email() возвращает 'received_headers' (список)
+    received_headers = headers.get('received_headers', [])
     if not isinstance(received_headers, list):
-        received_headers = [received_headers] if received_headers else []
+        received_headers = []
     
     result['received_count'] = len(received_headers)
     

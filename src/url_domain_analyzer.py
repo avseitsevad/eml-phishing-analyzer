@@ -4,7 +4,6 @@ URL&Domain Analyzer Module
 - Эвристический анализ доменов: длина, TLD
 - Детектирование IP-адреса вместо домена в URL
 - Обнаружение URL-shorteners
-- Выход: эвристические признаки и веса для каждого домена и URL
 """
 
 import re
@@ -44,18 +43,28 @@ def is_private_ip(ip: str) -> bool:
     Returns:
         bool: True если IP приватный
     """
+    if not ip or not isinstance(ip, str):
+        return False
+    
+    parts = ip.split('.')
+    if len(parts) != 4:
+        return False
+    
     try:
-        parts = ip.split('.')
-        if len(parts) != 4:
-            return False
+        first = int(parts[0])
+        # 10.0.0.0/8
+        if first == 10:
+            return True
         
-        # Проверка диапазонов
-        if parts[0] == '10':
+        # 192.168.0.0/16
+        if first == 192 and int(parts[1]) == 168:
             return True
-        if parts[0] == '192' and parts[1] == '168':
-            return True
-        if parts[0] == '172' and 16 <= int(parts[1]) <= 31:
-            return True
+        
+        # 172.16.0.0/12
+        if first == 172:
+            second = int(parts[1])
+            if 16 <= second <= 31:
+                return True
         
         return False
     except (ValueError, IndexError):
@@ -216,7 +225,7 @@ def _extract_entities(parsed_email_data: Dict[str, Any]) -> Tuple[List[str], Lis
 
 
 @timing_decorator
-def analyze_urls_and_domains(parsed_email_data: Dict[str, Any]) -> Dict[str, Any]:
+def analyze_urls_and_domains(parsed_email_data: Dict[str, Any]) -> Dict[str, bool]:
     """
     Главная функция для анализа URL и доменов.
     
@@ -232,10 +241,10 @@ def analyze_urls_and_domains(parsed_email_data: Dict[str, Any]) -> Dict[str, Any
     domains, urls, ips = _extract_entities(parsed_email_data)
 
     flags = {
+        'has_url_shortener': has_shortened_url(urls),
         'has_long_domain': any(is_long_domain(domain) for domain in domains),
         'has_suspicious_tld': any(is_suspicious_tld(domain) for domain in domains),
-        'has_ip_in_url': has_ip_based_url(urls),
-        'has_url_shortener': has_shortened_url(urls)
+        'has_ip_in_url': has_ip_based_url(urls)
     }
     
     logger.info(

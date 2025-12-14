@@ -80,14 +80,7 @@ def load_eml_file(file_input: Union[str, Path, Any]) -> str:
     # Декодирование с поддержкой UTF-8, Windows-1251, KOI8-R
     content_str = decode_text(content_bytes)
     
-    # Валидация: наличие ':' и минимальная длина >50
-    if ':' not in content_str:
-        raise ValueError("Invalid email format: no ':' found in headers")
-    
-    if len(content_str) <= 50:
-        raise ValueError(f"Email too short: {len(content_str)} characters (minimum 50 required)")
-    
-    # Дополнительная валидация через validate_eml_format
+    # Валидация формата .eml
     if not validate_eml_format(content_str):
         raise ValueError("Provided content is not a valid .eml message")
     
@@ -252,7 +245,7 @@ def extract_domains(
     
     # 1. Из URL в теле письма
     if urls is None:
-        urls = extract_urls(message)
+        urls = extract_urls(message, body=None) 
 
     for url in urls:
         hostname, is_ip = extract_hostname_from_url(url)
@@ -337,10 +330,6 @@ def parse_email(email_string: str) -> Dict[str, Any]:
     # Конвертация строки в bytes для парсинга
     email_bytes = email_string.encode('utf-8', errors='replace')
     
-    # Валидация формата
-    if not validate_eml_format(email_string):
-        raise ValueError("Provided content is not a valid .eml message")
-    
     # Парсинг через стандартную библиотеку email.parser
     parser = BytesParser(policy=default)
     message = parser.parsebytes(email_bytes)
@@ -353,6 +342,7 @@ def parse_email(email_string: str) -> Dict[str, Any]:
     body = extract_body(message)
     urls = extract_urls(message, body=body)
     attachments_metadata = extract_attachments_metadata(message)
+    # Передаем уже извлеченные headers и urls 
     domains_info = extract_domains(message, headers=headers, urls=urls)
     
     # Формирование результата в требуемом формате

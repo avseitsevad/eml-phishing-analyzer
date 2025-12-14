@@ -40,7 +40,14 @@ class Translator:
         Returns:
             str: код языка ('ru' или 'en')
         """
-        return detect(text)
+        if not text or len(text.strip()) < 3:
+            return 'en'  # По умолчанию английский для коротких/пустых текстов
+        
+        try:
+            return detect(text)
+        except Exception as e:
+            logger.warning(f"Language detection failed: {e}, defaulting to 'en'")
+            return 'en'
     
     def translate_to_english(self, text: str, source_lang: str = 'ru') -> str:
         """

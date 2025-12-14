@@ -7,6 +7,7 @@ import re
 import logging
 import pickle
 from pathlib import Path
+from typing import Dict, Any
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -28,13 +29,6 @@ lemmatizer = WordNetLemmatizer()
 STOP_WORDS = set(stopwords.words('english'))
 
 from .utils import URL_SHORTENERS
-
-# Опасные расширения файлов
-DANGEROUS_EXTENSIONS = {
-    '.exe', '.scr', '.bat', '.cmd', '.com', '.pif', '.vbs', '.js',
-    '.jar', '.app', '.deb', '.pkg', '.dmg', '.msi', '.dll', '.lnk',
-    '.hta', '.wsf', '.ps1', '.sh', '.run', '.bin'
-}
 
 # Ключевые слова срочности
 URGENCY_KEYWORDS = {
@@ -73,33 +67,47 @@ class FeatureExtractor:
     
     def extract_quantitative_features(self, parsed_email: dict, urls: list, 
                                      attachments: list) -> np.ndarray:
-        """Извлечение количественных метрик: counts URL/attachments/IPs"""
+        """
+        Извлечение количественных метрик: counts URL/attachments/IPs
+        Применяется логарифмическая нормализация (log1p) для совместимости с TF-IDF векторами
+        """
         url_count = len(urls) if urls else 0
         attachment_count = len(attachments) if attachments else 0
         ip_count = len(parsed_email.get('ips', []))
-        return np.array([url_count, attachment_count, ip_count], dtype=np.float32)
+        
+        features = np.array([url_count, attachment_count, ip_count], dtype=np.float32)
+        # Логарифмическая нормализация: log(1 + x) для уменьшения влияния больших значений
+        # 0→0, 1→0.69, 5→1.79, 50→3.93
+        return np.log1p(features)
     
     def extract_structural_features(self, subject: str, body: str) -> np.ndarray:
         """Извлечение структурных характеристик: length Subject/body"""
         return np.array([len(subject or ''), len(body or '')], dtype=np.float32)
     
-    def extract_binary_indicators(self, attachments: list, urls: list) -> np.ndarray:
-        """Извлечение бинарных индикаторов: dangerous extensions, shorteners"""
-        has_dangerous_extensions = 0
-        if attachments:
-            for attachment in attachments:
-                filename = attachment.get('filename', '') if isinstance(attachment, dict) else str(attachment)
-                if any(filename.lower().endswith(ext) for ext in DANGEROUS_EXTENSIONS):
-                    has_dangerous_extensions = 1
-                    break
+    def extract_binary_indicators(
+        self, 
+        url_analysis: dict
+    ) -> np.ndarray:
+        """
+        Извлечение бинарных индикаторов с использованием результатов url_domain_analyzer
         
-        has_url_shorteners = 0
-        if urls:
-            url_text = ' '.join(str(url).lower() for url in urls)
-            if any(shortener in url_text for shortener in URL_SHORTENERS):
-                has_url_shorteners = 1
+        Args:
+            url_analysis: результат url_domain_analyzer.analyze_urls_and_domains()
         
-        return np.array([has_dangerous_extensions, has_url_shorteners], dtype=np.float32)
+        Returns:
+            np.ndarray: [has_url_shortener, has_long_domain, has_suspicious_tld, has_ip_in_url]
+        """
+        has_url_shortener = 1 if url_analysis.get('has_url_shortener', False) else 0
+        has_long_domain = 1 if url_analysis.get('has_long_domain', False) else 0
+        has_suspicious_tld = 1 if url_analysis.get('has_suspicious_tld', False) else 0
+        has_ip_in_url = 1 if url_analysis.get('has_ip_in_url', False) else 0
+        
+        return np.array([
+            has_url_shortener,
+            has_long_domain,
+            has_suspicious_tld,
+            has_ip_in_url
+        ], dtype=np.float32)
     
     def extract_linguistic_features(self, text: str) -> np.ndarray:
         """Извлечение лингвистических метрик: urgency keywords"""
@@ -139,9 +147,13 @@ class FeatureExtractor:
         logger.info(f"TF-IDF vectorizer fitted on {len(texts)} texts")
     
     def vectorize_text(self, text: str) -> np.ndarray:
-        """TF-IDF векторизация текста (требует предварительного fit)"""
+        """TF-IDF векторизация текста"""
         if not self.is_fitted:
             raise ValueError("Vectorizer must be fitted before vectorization. Call fit_vectorizer() first.")
+        
+        # Проверка наличия словаря признаков (vocabulary)
+        if not hasattr(self.tfidf_vectorizer, 'vocabulary_') or not self.tfidf_vectorizer.vocabulary_:
+            raise ValueError("Vectorizer vocabulary is empty. Call fit_vectorizer() first.")
         
         processed_text = self.preprocess_text(text or '')
         vector = self.tfidf_vectorizer.transform([processed_text])
@@ -152,25 +164,79 @@ class FeatureExtractor:
         """Объединение TF-IDF векторов и синтетических признаков"""
         return np.concatenate([tfidf_vector, synthetic_features]).astype(np.float32)
     
-    def extract_all_features(self, parsed_email: dict, translated_text: str) -> np.ndarray:
-        """Главный метод для извлечения всех признаков из письма"""
+    def extract_all_features(
+        self, 
+        parsed_email: dict, 
+        translated_text: str,
+        url_analysis: dict
+    ) -> Dict[str, Any]:
+        """
+        Главный метод для извлечения всех признаков из письма
+        
+        Args:
+            parsed_email: результат email_parser.parse_email() (плоская структура)
+            translated_text: переведенный текст письма
+            url_analysis: результат url_domain_analyzer.analyze_urls_and_domains()
+        
+        Returns:
+            dict: {
+                'tfidf_vector': np.ndarray,
+                'synthetic_features': dict,
+                'feature_vector': np.ndarray
+            }
+        """
+        # Извлечение данных из плоской структуры email_parser
         urls = parsed_email.get('urls', [])
-        attachments = parsed_email.get('attachments_metadata', [])
-        headers = parsed_email.get('headers', {})
-        body_data = parsed_email.get('body', {})
+        attachments = parsed_email.get('attachments', [])
+        subject = parsed_email.get('subject', '') or ''
         
-        subject = headers.get('subject', '') or ''
-        body_text = body_data.get('text', '') or body_data.get('html', '') or ''
+        # Объединение body_plain и body_html
+        body_plain = parsed_email.get('body_plain', '') or ''
+        body_html = parsed_email.get('body_html', '') or ''
+        body_text = body_plain or body_html
         
+        # Извлечение признаков
         quantitative = self.extract_quantitative_features(parsed_email, urls, attachments)
         structural = self.extract_structural_features(subject, body_text)
-        binary = self.extract_binary_indicators(attachments, urls)
+        binary = self.extract_binary_indicators(url_analysis)
         linguistic = self.extract_linguistic_features(translated_text)
         
-        synthetic_features = np.concatenate([quantitative, structural, binary, linguistic])
+        # Объединение всех синтетических признаков
+        synthetic_features_array = np.concatenate([quantitative, structural, binary, linguistic])
+        
+        # TF-IDF векторизация
         tfidf_vector = self.vectorize_text(translated_text)
         
-        return self.combine_features(tfidf_vector, synthetic_features)
+        # Объединение TF-IDF и синтетических признаков
+        feature_vector = self.combine_features(tfidf_vector, synthetic_features_array)
+        
+        # Формирование словаря синтетических признаков для детализации
+        synthetic_features_dict = {
+            'quantitative': {
+                'url_count': int(quantitative[0]),
+                'attachment_count': int(quantitative[1]),
+                'ip_count': int(quantitative[2])
+            },
+            'structural': {
+                'subject_length': int(structural[0]),
+                'body_length': int(structural[1])
+            },
+            'binary': {
+                'has_url_shortener': int(binary[0]),
+                'has_long_domain': int(binary[1]),
+                'has_suspicious_tld': int(binary[2]),
+                'has_ip_in_url': int(binary[3])
+            },
+            'linguistic': {
+                'urgency_markers_count': int(linguistic[0])
+            }
+        }
+        
+        return {
+            'tfidf_vector': tfidf_vector,
+            'synthetic_features': synthetic_features_dict,
+            'feature_vector': feature_vector
+        }
     
     def save_vectorizer(self, path: str):
         """Сохранение обученного TfidfVectorizer"""

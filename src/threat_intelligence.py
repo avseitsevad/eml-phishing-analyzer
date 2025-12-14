@@ -20,16 +20,18 @@ class ThreatIntelligence:
     Управляет подключением к SQLite и проверкой репутации
     """
     
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, max_cache_size: int = 10000):
         """
         Инициализация подключения к базе данных
         
         Args:
             db_path: путь к файлу SQLite базы данных
+            max_cache_size: максимальный размер кэша (по умолчанию 10000 записей)
         """
         self.db_path = db_path
         self.conn = None
         self.cache = {}  # Кэш для результатов проверок
+        self.max_cache_size = max_cache_size
         self._connect()
         self.create_database_schema()
     
@@ -90,25 +92,36 @@ class ThreatIntelligence:
         if cache_key in self.cache:
             return self.cache[cache_key]
         
-        cursor = self.conn.cursor()
-        cursor.execute("""
-            SELECT threat_type, source 
-            FROM malicious_domains 
-            WHERE domain = ?
-        """, (normalized_domain,))
-        
-        result = cursor.fetchone()
-        if result:
-            reputation = {
-                'found': True,
-                'threat_type': result['threat_type'] or 'malicious',
-                'source': result['source'] or 'URLhaus'
-            }
-        else:
-            reputation = {'found': False, 'threat_type': 'clean', 'source': None}
-        
-        self.cache[cache_key] = reputation
-        return reputation
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT threat_type, source 
+                FROM malicious_domains 
+                WHERE domain = ?
+            """, (normalized_domain,))
+            
+            result = cursor.fetchone()
+            if result:
+                reputation = {
+                    'found': True,
+                    'threat_type': result['threat_type'] or 'malicious',
+                    'source': result['source'] or 'URLhaus'
+                }
+            else:
+                reputation = {'found': False, 'threat_type': 'clean', 'source': None}
+            
+            # Ограничение размера кэша: удаляем старые записи при превышении лимита
+            if len(self.cache) >= self.max_cache_size:
+                # Удаляем 20% самых старых записей (FIFO)
+                keys_to_remove = list(self.cache.keys())[:self.max_cache_size // 5]
+                for key in keys_to_remove:
+                    del self.cache[key]
+            
+            self.cache[cache_key] = reputation
+            return reputation
+        except sqlite3.Error as e:
+            logger.error(f"Database error in check_domain_reputation: {e}")
+            return {'found': False, 'threat_type': 'clean', 'source': None}
     
     def check_ip_reputation(self, ip_address: str) -> dict:
         """Проверка IP-адреса в локальной базе индикаторов"""
@@ -119,25 +132,36 @@ class ThreatIntelligence:
         if cache_key in self.cache:
             return self.cache[cache_key]
         
-        cursor = self.conn.cursor()
-        cursor.execute("""
-            SELECT threat_type, source 
-            FROM malicious_ips 
-            WHERE ip = ?
-        """, (ip_address,))
-        
-        result = cursor.fetchone()
-        if result:
-            reputation = {
-                'found': True,
-                'threat_type': result['threat_type'] or 'malicious',
-                'source': result['source'] or 'URLhaus'
-            }
-        else:
-            reputation = {'found': False, 'threat_type': 'clean', 'source': None}
-        
-        self.cache[cache_key] = reputation
-        return reputation
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT threat_type, source 
+                FROM malicious_ips 
+                WHERE ip = ?
+            """, (ip_address,))
+            
+            result = cursor.fetchone()
+            if result:
+                reputation = {
+                    'found': True,
+                    'threat_type': result['threat_type'] or 'malicious',
+                    'source': result['source'] or 'URLhaus'
+                }
+            else:
+                reputation = {'found': False, 'threat_type': 'clean', 'source': None}
+            
+            # Ограничение размера кэша: удаляем старые записи при превышении лимита
+            if len(self.cache) >= self.max_cache_size:
+                # Удаляем 20% самых старых записей (FIFO)
+                keys_to_remove = list(self.cache.keys())[:self.max_cache_size // 5]
+                for key in keys_to_remove:
+                    del self.cache[key]
+            
+            self.cache[cache_key] = reputation
+            return reputation
+        except sqlite3.Error as e:
+            logger.error(f"Database error in check_ip_reputation: {e}")
+            return {'found': False, 'threat_type': 'clean', 'source': None}
     
     def check_domains_batch(self, domains: List[str]) -> Dict[str, Any]:
         """
@@ -179,20 +203,28 @@ class ThreatIntelligence:
                 'domain_in_openphish': False
             }
         
-        cursor = self.conn.cursor()
-        normalized_list = [nd for _, nd in normalized]
-        placeholders = ','.join(['?'] * len(normalized_list))
-        cursor.execute(f"""
-            SELECT domain, threat_type, source 
-            FROM malicious_domains 
-            WHERE domain IN ({placeholders})
-        """, normalized_list)
-        
-        found_domains_info = {}
-        for row in cursor.fetchall():
-            found_domains_info[row['domain']] = {
-                'threat_type': row['threat_type'],
-                'source': row['source']
+        try:
+            cursor = self.conn.cursor()
+            normalized_list = [nd for _, nd in normalized]
+            placeholders = ','.join(['?'] * len(normalized_list))
+            cursor.execute(f"""
+                SELECT domain, threat_type, source 
+                FROM malicious_domains 
+                WHERE domain IN ({placeholders})
+            """, normalized_list)
+            
+            found_domains_info = {}
+            for row in cursor.fetchall():
+                found_domains_info[row['domain']] = {
+                    'threat_type': row['threat_type'],
+                    'source': row['source']
+                }
+        except sqlite3.Error as e:
+            logger.error(f"Database error in check_domains_batch: {e}")
+            return {
+                'malicious_domains': [],
+                'domain_in_urlhaus': False,
+                'domain_in_openphish': False
             }
         
         for orig_domain, norm_domain in normalized:

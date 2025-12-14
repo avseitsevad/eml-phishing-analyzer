@@ -6,6 +6,13 @@ Rules Engine Module
 # Константы для правил
 RECEIVED_HOPS_THRESHOLD = 10
 
+# Опасные расширения файлов
+DANGEROUS_EXTENSIONS = {
+    '.exe', '.scr', '.bat', '.cmd', '.com', '.pif', '.vbs', '.js',
+    '.jar', '.app', '.deb', '.pkg', '.dmg', '.msi', '.dll', '.lnk',
+    '.hta', '.wsf', '.ps1', '.sh', '.run', '.bin'
+}
+
 # Веса правил
 RULE_WEIGHTS = {
     'spf_fail': 15,
@@ -16,6 +23,7 @@ RULE_WEIGHTS = {
     'ip_in_ti_db': 25,
     'reply_anomaly': 10,
     'received_hops_anomaly': 15,
+    'dangerous_attachments': 20,
 }
 
 
@@ -130,17 +138,17 @@ def check_threat_intelligence(ti_results: dict) -> dict:
     score = 0
     found_items = []
     
-    # Проверка доменов
-    for domain in malicious_domains:
-        if domain:
-            score += RULE_WEIGHTS['domain_in_ti_db']
-            found_items.append(f"Domain: {domain}")
+    # Проверка доменов (только уникальные)
+    unique_domains = set(domain for domain in malicious_domains if domain)
+    for domain in unique_domains:
+        score += RULE_WEIGHTS['domain_in_ti_db']
+        found_items.append(f"Domain: {domain}")
     
-    # Проверка IP-адресов
-    for ip in malicious_ips:
-        if ip:
-            score += RULE_WEIGHTS['ip_in_ti_db']
-            found_items.append(f"IP: {ip}")
+    # Проверка IP-адресов (только уникальные)
+    unique_ips = set(ip for ip in malicious_ips if ip)
+    for ip in unique_ips:
+        score += RULE_WEIGHTS['ip_in_ti_db']
+        found_items.append(f"IP: {ip}")
     
     details = '; '.join(found_items) if found_items else 'No threats found in TI database'
     
@@ -198,6 +206,45 @@ def check_received_hops_anomaly(header_analysis: dict) -> dict:
         'triggered': False,
         'score': 0,
         'details': f'Received hops count: {received_count} (normal)'
+    }
+
+
+def check_dangerous_attachments(parsed_email: dict) -> dict:
+    """
+    Проверка наличия вложений с опасными расширениями
+    
+    Args:
+        parsed_email: результат parse_email() из email_parser
+        
+    Returns:
+        dict: результат проверки
+    """
+    attachments = parsed_email.get('attachments', [])
+    
+    if not attachments:
+        return {
+            'triggered': False,
+            'score': 0,
+            'details': 'No attachments found'
+        }
+    
+    dangerous_files = []
+    for attachment in attachments:
+        filename = attachment.get('name', '') if isinstance(attachment, dict) else str(attachment)
+        if any(filename.lower().endswith(ext) for ext in DANGEROUS_EXTENSIONS):
+            dangerous_files.append(filename)
+    
+    if dangerous_files:
+        return {
+            'triggered': True,
+            'score': RULE_WEIGHTS['dangerous_attachments'],
+            'details': f'Dangerous file extensions found: {", ".join(dangerous_files)}'
+        }
+    
+    return {
+        'triggered': False,
+        'score': 0,
+        'details': 'No dangerous file extensions detected'
     }
 
 
@@ -319,6 +366,16 @@ def evaluate_all_rules(header_analysis: dict, parsed_email: dict,
             'description': ti_result['details']
         })
     rule_details['threat_intelligence'] = ti_result
+    
+    # 6. Dangerous attachments
+    attachments_result = check_dangerous_attachments(parsed_email)
+    if attachments_result['triggered']:
+        triggered_rules.append({
+            'rule_name': 'dangerous_attachments',
+            'weight': attachments_result['score'],
+            'description': attachments_result['details']
+        })
+    rule_details['dangerous_attachments'] = attachments_result
     
     # Calculate risk score
     risk_score = calculate_risk_score(triggered_rules)
