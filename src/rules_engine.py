@@ -314,6 +314,14 @@ def evaluate_all_rules(header_analysis: dict, parsed_email: dict,
             'rule_details': dict
         }
     """
+    # Валидация входных данных
+    if not isinstance(header_analysis, dict):
+        header_analysis = {}
+    if not isinstance(parsed_email, dict):
+        parsed_email = {}
+    if not isinstance(ti_results, dict):
+        ti_results = {}
+    
     triggered_rules = []
     rule_details = {}
     

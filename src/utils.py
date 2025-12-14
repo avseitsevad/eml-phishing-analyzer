@@ -15,8 +15,22 @@ import json
 import logging
 import functools
 import time
+import re
 from pathlib import Path
-from typing import Any, Dict, Callable, Optional, Union
+from typing import Any, Dict, Callable, Optional, Union, Tuple
+from urllib.parse import urlparse
+import tldextract
+
+# Общие константы для проекта (используются в 2+ модулях)
+URL_SHORTENERS = {
+    'bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly', 
+    'cutt.ly', 'rb.gy', 'j.mp', 'tiny.cc', 'short.link',
+    'is.gd', 'buff.ly', 'rebrand.ly', 'bitly.com'
+}
+
+# Регулярные выражения для парсинга
+IP_PATTERN = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
+EMAIL_DOMAIN_PATTERN = re.compile(r'@([a-zA-Z0-9._-]+\.[a-zA-Z]{2,})', re.IGNORECASE)
 
 
 def load_config(config_path: Union[str, Path]) -> Dict[str, Any]:
@@ -84,13 +98,6 @@ def setup_logging(
     
     logging.getLogger('urllib3').setLevel(logging.WARNING)
     logging.getLogger('requests').setLevel(logging.WARNING)
-
-# Добавить в src/utils.py
-
-import re
-from urllib.parse import urlparse
-from typing import Optional, Tuple
-import tldextract
 
 def extract_hostname_from_url(url: str) -> Tuple[Optional[str], bool]:
     """
@@ -333,15 +340,3 @@ def save_results(results: dict, output_path: Union[str, Path]) -> None:
     
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
-
-
-# Общие константы для проекта (используются в 2+ модулях)
-URL_SHORTENERS = {
-    'bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly', 
-    'cutt.ly', 'rb.gy', 'j.mp', 'tiny.cc', 'short.link',
-    'is.gd', 'buff.ly', 'rebrand.ly', 'bitly.com'
-}
-
-# Регулярные выражения для парсинга
-IP_PATTERN = re.compile(r'\b(?:\d{1,3}\.){3}\d{1,3}\b')
-EMAIL_DOMAIN_PATTERN = re.compile(r'@([a-zA-Z0-9._-]+\.[a-zA-Z]{2,})', re.IGNORECASE)

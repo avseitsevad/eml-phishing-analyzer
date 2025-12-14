@@ -157,10 +157,17 @@ def extract_body(message: EmailMessage) -> Dict[str, str]:
     return body
 
 
-def extract_attachments_metadata(message: EmailMessage) -> List[Dict[str, Any]]:
+def extract_attachments_metadata(message: EmailMessage, max_attachment_size: int = 50 * 1024 * 1024) -> List[Dict[str, Any]]:
     """
     Извлечение метаданных вложений.
     Не сохраняет файлы на диск - только метаданные.
+    
+    Args:
+        message: EmailMessage объект
+        max_attachment_size: максимальный размер вложения в байтах (по умолчанию 50MB)
+    
+    Returns:
+        List[Dict]: список метаданных вложений
     """
     attachments = []
     
@@ -173,9 +180,36 @@ def extract_attachments_metadata(message: EmailMessage) -> List[Dict[str, Any]]:
         if 'attachment' in content_disposition:
             filename = part.get_filename()
             content_type = part.get_content_type()
-            payload = part.get_payload(decode=True)
-            size = len(payload) if payload else 0
-            sha256_hash = hashlib.sha256(payload).hexdigest() if payload else ''
+            
+            # Проверяем размер перед декодированием
+            # Пытаемся получить размер без полной загрузки в память
+            try:
+                payload = part.get_payload(decode=True)
+                if payload is None:
+                    size = 0
+                    sha256_hash = ''
+                else:
+                    size = len(payload)
+                    
+                    # Пропускаем слишком большие вложения для предотвращения утечки памяти
+                    if size > max_attachment_size:
+                        logger.warning(
+                            f"Вложение {filename} пропущено: размер {size} байт превышает лимит {max_attachment_size} байт"
+                        )
+                        attachments.append({
+                            'filename': filename or 'unknown',
+                            'content_type': content_type,
+                            'size': size,
+                            'sha256': 'skipped_too_large',
+                            'error': f'Attachment size {size} exceeds limit {max_attachment_size}'
+                        })
+                        continue
+                    
+                    sha256_hash = hashlib.sha256(payload).hexdigest()
+            except Exception as e:
+                logger.error(f"Ошибка при обработке вложения {filename}: {e}")
+                size = 0
+                sha256_hash = ''
             
             attachments.append({
                 'filename': filename or 'unknown',
@@ -322,11 +356,22 @@ def parse_email(email_string: str) -> Dict[str, Any]:
         - body_plain, body_html
         - auth_results
         - received_headers (list)
-        - attachments (list of dicts with 'name', 'type', 'size')
+        - attachments (list of dicts with 'name', 'type', 'size', 'sha256')
         - urls (list)
         - domains (list)
         - ips (list)
+        
+    Raises:
+        TypeError: Если email_string не является строкой
+        ValueError: Если парсер вернул пустое сообщение
     """
+    # Валидация типа входных данных
+    if not isinstance(email_string, str):
+        raise TypeError(f"Expected str for email_string, got {type(email_string).__name__}")
+    
+    if not email_string or not email_string.strip():
+        raise ValueError("email_string cannot be empty")
+    
     # Конвертация строки в bytes для парсинга
     email_bytes = email_string.encode('utf-8', errors='replace')
     
@@ -363,7 +408,8 @@ def parse_email(email_string: str) -> Dict[str, Any]:
             {
                 'name': att.get('filename', 'unknown'),
                 'type': att.get('content_type', ''),
-                'size': att.get('size', 0)
+                'size': att.get('size', 0),
+                'sha256': att.get('sha256', '')
             }
             for att in attachments_metadata
         ],

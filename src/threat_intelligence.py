@@ -5,6 +5,7 @@ Threat Intelligence Module
 
 import sqlite3
 import logging
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Optional, List, Any
 
@@ -30,7 +31,7 @@ class ThreatIntelligence:
         """
         self.db_path = db_path
         self.conn = None
-        self.cache = {}  # Кэш для результатов проверок
+        self.cache = OrderedDict()  # LRU кэш для результатов проверок
         self.max_cache_size = max_cache_size
         self._connect()
         self.create_database_schema()
@@ -90,6 +91,8 @@ class ThreatIntelligence:
         
         cache_key = f"domain:{normalized_domain}"
         if cache_key in self.cache:
+            # Перемещаем в конец (самый недавно использованный)
+            self.cache.move_to_end(cache_key)
             return self.cache[cache_key]
         
         try:
@@ -110,12 +113,9 @@ class ThreatIntelligence:
             else:
                 reputation = {'found': False, 'threat_type': 'clean', 'source': None}
             
-            # Ограничение размера кэша: удаляем старые записи при превышении лимита
+            # LRU кэш: удаляем самую старую запись при превышении лимита
             if len(self.cache) >= self.max_cache_size:
-                # Удаляем 20% самых старых записей (FIFO)
-                keys_to_remove = list(self.cache.keys())[:self.max_cache_size // 5]
-                for key in keys_to_remove:
-                    del self.cache[key]
+                self.cache.popitem(last=False)  # Удаляем самую старую запись (FIFO)
             
             self.cache[cache_key] = reputation
             return reputation
@@ -130,6 +130,8 @@ class ThreatIntelligence:
         
         cache_key = f"ip:{ip_address}"
         if cache_key in self.cache:
+            # Перемещаем в конец (самый недавно использованный)
+            self.cache.move_to_end(cache_key)
             return self.cache[cache_key]
         
         try:
@@ -150,12 +152,9 @@ class ThreatIntelligence:
             else:
                 reputation = {'found': False, 'threat_type': 'clean', 'source': None}
             
-            # Ограничение размера кэша: удаляем старые записи при превышении лимита
+            # LRU кэш: удаляем самую старую запись при превышении лимита
             if len(self.cache) >= self.max_cache_size:
-                # Удаляем 20% самых старых записей (FIFO)
-                keys_to_remove = list(self.cache.keys())[:self.max_cache_size // 5]
-                for key in keys_to_remove:
-                    del self.cache[key]
+                self.cache.popitem(last=False)  # Удаляем самую старую запись (FIFO)
             
             self.cache[cache_key] = reputation
             return reputation
@@ -247,7 +246,13 @@ class ThreatIntelligence:
                         'threat_type': found_domains_info[norm_domain]['threat_type'] or 'malicious',
                         'source': source
                     }
+                    # LRU кэш: удаляем самую старую запись при превышении лимита
+                    if len(self.cache) >= self.max_cache_size:
+                        self.cache.popitem(last=False)  # Удаляем самую старую запись (FIFO)
                     self.cache[cache_key] = reputation
+                else:
+                    # Перемещаем в конец (самый недавно использованный)
+                    self.cache.move_to_end(cache_key)
         
         return {
             'malicious_domains': malicious_domains,

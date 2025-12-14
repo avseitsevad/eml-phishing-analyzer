@@ -7,7 +7,7 @@ import re
 import logging
 import pickle
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -66,23 +66,40 @@ class FeatureExtractor:
         self.is_fitted = False
     
     def extract_quantitative_features(self, parsed_email: dict, urls: list, 
-                                     attachments: list) -> np.ndarray:
+                                     attachments: list) -> Tuple[np.ndarray, np.ndarray]:
         """
         Извлечение количественных метрик: counts URL/attachments/IPs
         Применяется логарифмическая нормализация (log1p) для совместимости с TF-IDF векторами
+        
+        Returns:
+            tuple: (normalized_features, raw_features) где normalized_features - log1p значения,
+                   raw_features - исходные значения для детализации
         """
         url_count = len(urls) if urls else 0
         attachment_count = len(attachments) if attachments else 0
         ip_count = len(parsed_email.get('ips', []))
         
-        features = np.array([url_count, attachment_count, ip_count], dtype=np.float32)
+        raw_features = np.array([url_count, attachment_count, ip_count], dtype=np.float32)
         # Логарифмическая нормализация: log(1 + x) для уменьшения влияния больших значений
         # 0→0, 1→0.69, 5→1.79, 50→3.93
-        return np.log1p(features)
+        normalized_features = np.log1p(raw_features)
+        return normalized_features, raw_features
     
-    def extract_structural_features(self, subject: str, body: str) -> np.ndarray:
-        """Извлечение структурных характеристик: length Subject/body"""
-        return np.array([len(subject or ''), len(body or '')], dtype=np.float32)
+    def extract_structural_features(self, subject: str, body: str) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Извлечение структурных характеристик: length Subject/body
+        Применяется логарифмическая нормализация (log1p) для согласованности с другими признаками
+        
+        Returns:
+            tuple: (normalized_features, raw_features) где normalized_features - log1p значения,
+                   raw_features - исходные значения для детализации
+        """
+        subject_len = len(subject or '')
+        body_len = len(body or '')
+        raw_features = np.array([subject_len, body_len], dtype=np.float32)
+        # Логарифмическая нормализация: log(1 + x) для уменьшения влияния больших значений
+        normalized_features = np.log1p(raw_features)
+        return normalized_features, raw_features
     
     def extract_binary_indicators(
         self, 
@@ -109,17 +126,28 @@ class FeatureExtractor:
             has_ip_in_url
         ], dtype=np.float32)
     
-    def extract_linguistic_features(self, text: str) -> np.ndarray:
-        """Извлечение лингвистических метрик: urgency keywords"""
+    def extract_linguistic_features(self, text: str) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Извлечение лингвистических метрик: urgency keywords
+        Применяется логарифмическая нормализация (log1p) для согласованности с другими признаками
+        
+        Returns:
+            tuple: (normalized_features, raw_features) где normalized_features - log1p значения,
+                   raw_features - исходные значения для детализации
+        """
         if not text:
-            return np.array([0.0], dtype=np.float32)
+            raw_features = np.array([0.0], dtype=np.float32)
+            return np.log1p(raw_features), raw_features
         
         text_lower = text.lower()
         urgency_count = sum(
             len(re.findall(r'\b' + re.escape(keyword) + r'\b', text_lower, re.IGNORECASE))
             for keyword in URGENCY_KEYWORDS
         )
-        return np.array([float(urgency_count)], dtype=np.float32)
+        raw_features = np.array([float(urgency_count)], dtype=np.float32)
+        # Логарифмическая нормализация: log(1 + x) для согласованности
+        normalized_features = np.log1p(raw_features)
+        return normalized_features, raw_features
     
     def preprocess_text(self, text: str) -> str:
         """Предобработка текста: токенизация, лемматизация, удаление стоп-слов"""
@@ -196,13 +224,13 @@ class FeatureExtractor:
         body_text = body_plain or body_html
         
         # Извлечение признаков
-        quantitative = self.extract_quantitative_features(parsed_email, urls, attachments)
-        structural = self.extract_structural_features(subject, body_text)
+        quantitative_norm, quantitative_raw = self.extract_quantitative_features(parsed_email, urls, attachments)
+        structural_norm, structural_raw = self.extract_structural_features(subject, body_text)
         binary = self.extract_binary_indicators(url_analysis)
-        linguistic = self.extract_linguistic_features(translated_text)
+        linguistic_norm, linguistic_raw = self.extract_linguistic_features(translated_text)
         
-        # Объединение всех синтетических признаков
-        synthetic_features_array = np.concatenate([quantitative, structural, binary, linguistic])
+        # Объединение всех синтетических признаков (используем нормализованные значения)
+        synthetic_features_array = np.concatenate([quantitative_norm, structural_norm, binary, linguistic_norm])
         
         # TF-IDF векторизация
         tfidf_vector = self.vectorize_text(translated_text)
@@ -210,16 +238,16 @@ class FeatureExtractor:
         # Объединение TF-IDF и синтетических признаков
         feature_vector = self.combine_features(tfidf_vector, synthetic_features_array)
         
-        # Формирование словаря синтетических признаков для детализации
+        # Формирование словаря синтетических признаков для детализации (используем исходные значения)
         synthetic_features_dict = {
             'quantitative': {
-                'url_count': int(quantitative[0]),
-                'attachment_count': int(quantitative[1]),
-                'ip_count': int(quantitative[2])
+                'url_count': int(quantitative_raw[0]),
+                'attachment_count': int(quantitative_raw[1]),
+                'ip_count': int(quantitative_raw[2])
             },
             'structural': {
-                'subject_length': int(structural[0]),
-                'body_length': int(structural[1])
+                'subject_length': int(structural_raw[0]),
+                'body_length': int(structural_raw[1])
             },
             'binary': {
                 'has_url_shortener': int(binary[0]),
@@ -228,7 +256,7 @@ class FeatureExtractor:
                 'has_ip_in_url': int(binary[3])
             },
             'linguistic': {
-                'urgency_markers_count': int(linguistic[0])
+                'urgency_markers_count': int(linguistic_raw[0])
             }
         }
         
