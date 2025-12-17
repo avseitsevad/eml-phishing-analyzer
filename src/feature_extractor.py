@@ -28,9 +28,7 @@ for resource in ['tokenizers/punkt', 'corpora/stopwords', 'corpora/wordnet']:
 lemmatizer = WordNetLemmatizer()
 STOP_WORDS = set(stopwords.words('english'))
 
-from .utils import URL_SHORTENERS
-
-# Ключевые слова срочности
+# Ключевые слова срочности (английские - т.к. текст уже переведен)
 URGENCY_KEYWORDS = {
     'urgent', 'immediately', 'asap', 'as soon as possible', 'hurry',
     'expire', 'expiring', 'expires', 'expiration', 'deadline',
@@ -65,46 +63,50 @@ class FeatureExtractor:
         )
         self.is_fitted = False
     
-    def extract_quantitative_features(self, parsed_email: dict, urls: list, 
-                                     attachments: list) -> Tuple[np.ndarray, np.ndarray]:
+    def extract_quantitative_features(self, parsed_email: dict) -> Tuple[np.ndarray, np.ndarray]:
         """
         Извлечение количественных метрик: counts URL/attachments/IPs
         Применяется логарифмическая нормализация (log1p) для совместимости с TF-IDF векторами
         
+        Args:
+            parsed_email: результат email_parser.parse_email()
+        
         Returns:
-            tuple: (normalized_features, raw_features) где normalized_features - log1p значения,
-                   raw_features - исходные значения для детализации
+            tuple: (normalized_features, raw_features)
         """
-        url_count = len(urls) if urls else 0
-        attachment_count = len(attachments) if attachments else 0
+        url_count = len(parsed_email.get('urls', []))
+        attachment_count = len(parsed_email.get('attachments', []))
         ip_count = len(parsed_email.get('ips', []))
         
         raw_features = np.array([url_count, attachment_count, ip_count], dtype=np.float32)
-        # Логарифмическая нормализация: log(1 + x) для уменьшения влияния больших значений
-        # 0→0, 1→0.69, 5→1.79, 50→3.93
+        # Логарифмическая нормализация: log(1 + x)
         normalized_features = np.log1p(raw_features)
         return normalized_features, raw_features
     
-    def extract_structural_features(self, subject: str, body: str) -> Tuple[np.ndarray, np.ndarray]:
+    def extract_structural_features(self, parsed_email: dict) -> Tuple[np.ndarray, np.ndarray]:
         """
         Извлечение структурных характеристик: length Subject/body
-        Применяется логарифмическая нормализация (log1p) для согласованности с другими признаками
+        Применяется логарифмическая нормализация (log1p)
+        
+        Args:
+            parsed_email: результат email_parser.parse_email()
         
         Returns:
-            tuple: (normalized_features, raw_features) где normalized_features - log1p значения,
-                   raw_features - исходные значения для детализации
+            tuple: (normalized_features, raw_features)
         """
-        subject_len = len(subject or '')
-        body_len = len(body or '')
-        raw_features = np.array([subject_len, body_len], dtype=np.float32)
-        # Логарифмическая нормализация: log(1 + x) для уменьшения влияния больших значений
+        subject = parsed_email.get('subject', '') or ''
+        body_plain = parsed_email.get('body_plain', '') or ''
+        body_html = parsed_email.get('body_html', '') or ''
+        
+        # Используем длину body_plain или body_html (что доступно)
+        body_length = len(body_plain) if body_plain else len(body_html)
+        
+        subject_len = len(subject)
+        raw_features = np.array([subject_len, body_length], dtype=np.float32)
         normalized_features = np.log1p(raw_features)
         return normalized_features, raw_features
     
-    def extract_binary_indicators(
-        self, 
-        url_analysis: dict
-    ) -> np.ndarray:
+    def extract_binary_indicators(self, url_analysis: dict) -> np.ndarray:
         """
         Извлечение бинарных индикаторов с использованием результатов url_domain_analyzer
         
@@ -129,11 +131,13 @@ class FeatureExtractor:
     def extract_linguistic_features(self, text: str) -> Tuple[np.ndarray, np.ndarray]:
         """
         Извлечение лингвистических метрик: urgency keywords
-        Применяется логарифмическая нормализация (log1p) для согласованности с другими признаками
+        Применяется логарифмическая нормализация (log1p)
+        
+        Args:
+            text: переведенный текст письма (на английском)
         
         Returns:
-            tuple: (normalized_features, raw_features) где normalized_features - log1p значения,
-                   raw_features - исходные значения для детализации
+            tuple: (normalized_features, raw_features)
         """
         if not text:
             raw_features = np.array([0.0], dtype=np.float32)
@@ -145,7 +149,6 @@ class FeatureExtractor:
             for keyword in URGENCY_KEYWORDS
         )
         raw_features = np.array([float(urgency_count)], dtype=np.float32)
-        # Логарифмическая нормализация: log(1 + x) для согласованности
         normalized_features = np.log1p(raw_features)
         return normalized_features, raw_features
     
@@ -154,7 +157,12 @@ class FeatureExtractor:
         if not text:
             return ""
         
-        tokens = word_tokenize(text.lower())
+        try:
+            tokens = word_tokenize(text.lower())
+        except Exception as e:
+            logger.error(f"Tokenization failed: {e}")
+            tokens = text.lower().split()
+        
         processed_tokens = []
         for token in tokens:
             if not re.match(r'^[a-zA-Z]+$', token):
@@ -162,6 +170,7 @@ class FeatureExtractor:
             lemmatized = lemmatizer.lemmatize(token)
             if lemmatized not in STOP_WORDS and len(lemmatized) > 2:
                 processed_tokens.append(lemmatized)
+        
         return ' '.join(processed_tokens)
     
     def fit_vectorizer(self, texts: list):
@@ -172,14 +181,14 @@ class FeatureExtractor:
         processed_texts = [self.preprocess_text(str(text)) for text in texts]
         self.tfidf_vectorizer.fit(processed_texts)
         self.is_fitted = True
-        logger.info(f"TF-IDF vectorizer fitted on {len(texts)} texts")
+        logger.info(f"TF-IDF vectorizer fitted on {len(texts)} texts, "
+                   f"vocabulary size: {len(self.tfidf_vectorizer.vocabulary_)}")
     
     def vectorize_text(self, text: str) -> np.ndarray:
         """TF-IDF векторизация текста"""
         if not self.is_fitted:
             raise ValueError("Vectorizer must be fitted before vectorization. Call fit_vectorizer() first.")
         
-        # Проверка наличия словаря признаков (vocabulary)
         if not hasattr(self.tfidf_vectorizer, 'vocabulary_') or not self.tfidf_vectorizer.vocabulary_:
             raise ValueError("Vectorizer vocabulary is empty. Call fit_vectorizer() first.")
         
@@ -203,7 +212,7 @@ class FeatureExtractor:
         
         Args:
             parsed_email: результат email_parser.parse_email() (плоская структура)
-            translated_text: переведенный текст письма
+            translated_text: ПЕРЕВЕДЕННЫЙ текст из translation.translate_parsed_email()
             url_analysis: результат url_domain_analyzer.analyze_urls_and_domains()
         
         Returns:
@@ -213,32 +222,27 @@ class FeatureExtractor:
                 'feature_vector': np.ndarray
             }
         """
-        # Извлечение данных из плоской структуры email_parser
-        urls = parsed_email.get('urls', [])
-        attachments = parsed_email.get('attachments', [])
-        subject = parsed_email.get('subject', '') or ''
-        
-        # Объединение body_plain и body_html
-        body_plain = parsed_email.get('body_plain', '') or ''
-        body_html = parsed_email.get('body_html', '') or ''
-        body_text = body_plain or body_html
-        
-        # Извлечение признаков
-        quantitative_norm, quantitative_raw = self.extract_quantitative_features(parsed_email, urls, attachments)
-        structural_norm, structural_raw = self.extract_structural_features(subject, body_text)
+        # Извлечение синтетических признаков
+        quantitative_norm, quantitative_raw = self.extract_quantitative_features(parsed_email)
+        structural_norm, structural_raw = self.extract_structural_features(parsed_email)
         binary = self.extract_binary_indicators(url_analysis)
         linguistic_norm, linguistic_raw = self.extract_linguistic_features(translated_text)
         
-        # Объединение всех синтетических признаков (используем нормализованные значения)
-        synthetic_features_array = np.concatenate([quantitative_norm, structural_norm, binary, linguistic_norm])
+        # Объединение всех синтетических признаков (нормализованные значения)
+        synthetic_features_array = np.concatenate([
+            quantitative_norm, 
+            structural_norm, 
+            binary, 
+            linguistic_norm
+        ])
         
-        # TF-IDF векторизация
+        # TF-IDF векторизация ПЕРЕВЕДЕННОГО текста
         tfidf_vector = self.vectorize_text(translated_text)
         
         # Объединение TF-IDF и синтетических признаков
         feature_vector = self.combine_features(tfidf_vector, synthetic_features_array)
         
-        # Формирование словаря синтетических признаков для детализации (используем исходные значения)
+        # Формирование словаря для детализации (исходные значения)
         synthetic_features_dict = {
             'quantitative': {
                 'url_count': int(quantitative_raw[0]),
@@ -274,7 +278,10 @@ class FeatureExtractor:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, 'wb') as f:
-            pickle.dump({'vectorizer': self.tfidf_vectorizer, 'is_fitted': self.is_fitted}, f)
+            pickle.dump({
+                'vectorizer': self.tfidf_vectorizer, 
+                'is_fitted': self.is_fitted
+            }, f)
         logger.info(f"Vectorizer saved to {path}")
     
     def load_vectorizer(self, path: str):
@@ -287,4 +294,6 @@ class FeatureExtractor:
             data = pickle.load(f)
             self.tfidf_vectorizer = data['vectorizer']
             self.is_fitted = data.get('is_fitted', True)
-        logger.info(f"Vectorizer loaded from {path}")
+        
+        vocab_size = len(self.tfidf_vectorizer.vocabulary_) if hasattr(self.tfidf_vectorizer, 'vocabulary_') else 0
+        logger.info(f"Vectorizer loaded from {path}, vocabulary size: {vocab_size}")
