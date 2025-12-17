@@ -4,7 +4,7 @@ Translation Module
 """
 
 import logging
-from langdetect import detect
+from langdetect import detect, LangDetectException
 import argostranslate.package
 import argostranslate.translate
 
@@ -23,12 +23,16 @@ class Translator:
         Инициализация компонентов перевода
         Загрузка языковых пакетов Argos Translate (ru→en)
         """
-        installed_packages = argostranslate.package.get_installed_packages()
-        self.translator = next(
-            (pkg for pkg in installed_packages 
-             if pkg.from_code == "ru" and pkg.to_code == "en"),
-            None
-        )
+        try:
+            installed_packages = argostranslate.package.get_installed_packages()
+            self.translator = next(
+                (pkg for pkg in installed_packages 
+                 if pkg.from_code == "ru" and pkg.to_code == "en"),
+                None
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize translation packages: {e}")
+            self.translator = None
     
     def detect_language(self, text: str) -> str:
         """
@@ -38,15 +42,14 @@ class Translator:
             text: текст для анализа
             
         Returns:
-            str: код языка ('ru' или 'en')
+            str: код языка ('ru', 'en' или другой код языка)
         """
-        if not text or len(text.strip()) < 3:
-            return 'en'  # По умолчанию английский для коротких/пустых текстов
+        if not text or not isinstance(text, str) or len(text.strip()) < 3:
+            return 'en'
         
         try:
             return detect(text)
-        except Exception as e:
-            logger.warning(f"Language detection failed: {e}, defaulting to 'en'")
+        except (LangDetectException, Exception):
             return 'en'
     
     def translate_to_english(self, text: str, source_lang: str = 'ru') -> str:
@@ -58,57 +61,78 @@ class Translator:
             source_lang: исходный язык (по умолчанию 'ru')
             
         Returns:
-            str: переведенный текст на английском
+            str: переведенный текст на английском (или исходный текст при ошибке)
         """
+        if not text or not isinstance(text, str):
+            return text or ""
+        
         if source_lang == 'en':
             return text
         
-        return argostranslate.translate.translate(text, "ru", "en")
+        if self.translator is None:
+            return text
+        
+        try:
+            return argostranslate.translate.translate(text, "ru", "en")
+        except Exception as e:
+            logger.error(f"Translation failed: {e}")
+            return text
     
-    def process_email_text(self, subject: str, body: str) -> dict:
+    def get_translated_text(self, subject: str, body: str) -> str:
         """
-        Pipeline обработки: определение языка → перевод при необходимости
-        Обработка Subject и body письма
+        Получение объединенного переведенного текста для использования в feature_extractor
+        Объединяет subject и body в одну строку после перевода
         
         Args:
             subject: тема письма
             body: тело письма
             
         Returns:
-            dict: {
-                'original_subject': str,
-                'original_body': str,
-                'translated_subject': str,
-                'translated_body': str,
-                'detected_language': str,
-                'was_translated': bool
-            }
+            str: объединенный переведенный текст (subject + body)
         """
-        original_subject = subject if subject else ""
-        original_body = body if body else ""
+        subject = subject or ""
+        body = body or ""
         
         # Определяем язык по объединенному тексту
-        combined_text = f"{original_subject} {original_body}".strip()
+        combined_text = f"{subject} {body}".strip()
         detected_language = self.detect_language(combined_text)
         
         # Переводим только если язык русский
-        was_translated = False
-        translated_subject = original_subject
-        translated_body = original_body
-        
         if detected_language == 'ru':
-            if original_subject:
-                translated_subject = self.translate_to_english(original_subject, 'ru')
-                was_translated = True
-            if original_body:
-                translated_body = self.translate_to_english(original_body, 'ru')
-                was_translated = True
+            translated_subject = self.translate_to_english(subject, 'ru')
+            translated_body = self.translate_to_english(body, 'ru')
+        else:
+            translated_subject = subject
+            translated_body = body
         
-        return {
-            'original_subject': original_subject,
-            'original_body': original_body,
-            'translated_subject': translated_subject,
-            'translated_body': translated_body,
-            'detected_language': detected_language,
-            'was_translated': was_translated
-        }
+        # Объединяем переведенные части
+        translated_parts = []
+        if translated_subject:
+            translated_parts.append(translated_subject)
+        if translated_body:
+            translated_parts.append(translated_body)
+        
+        return ' '.join(translated_parts).strip()
+    
+    def translate_parsed_email(self, parsed_email: dict) -> str:
+        """
+        Удобный метод для перевода письма из результата email_parser.parse_email()
+        Автоматически объединяет body_plain и body_html
+        
+        Args:
+            parsed_email: результат email_parser.parse_email() со следующими полями:
+                - subject: str
+                - body_plain: str
+                - body_html: str
+                
+        Returns:
+            str: объединенный переведенный текст (subject + body) для feature_extractor
+        """
+        subject = parsed_email.get('subject', '') or ''
+        body_plain = parsed_email.get('body_plain', '') or ''
+        body_html = parsed_email.get('body_html', '') or ''
+        
+        # Объединяем body_plain и body_html (приоритет body_plain)
+        body = body_plain or body_html
+        
+        return self.get_translated_text(subject, body)
