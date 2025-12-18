@@ -9,12 +9,14 @@ import warnings
 from bs4 import BeautifulSoup
 from langdetect import detect, LangDetectException
 
-# КРИТИЧНО: подавление логирования ПЕРЕД импортом argostranslate
-logging.getLogger('argostranslate').setLevel(logging.ERROR)
-logging.getLogger('argostranslate.utils').setLevel(logging.ERROR)
-logging.getLogger('argostranslate.translate').setLevel(logging.ERROR)
-logging.getLogger('ctranslate2').setLevel(logging.ERROR)
-logging.getLogger('sentencepiece').setLevel(logging.ERROR)
+# КРИТИЧНО: полное подавление логирования argostranslate ПЕРЕД импортом
+# Устанавливаем уровень ERROR для всех связанных логгеров
+for logger_name in ['argostranslate', 'argostranslate.utils', 'argostranslate.translate', 
+                     'argostranslate.package', 'ctranslate2', 'sentencepiece']:
+    logger_obj = logging.getLogger(logger_name)
+    logger_obj.setLevel(logging.CRITICAL)
+    logger_obj.addHandler(logging.NullHandler())
+    logger_obj.propagate = False
 
 # Подавление warnings от pkg_resources
 warnings.filterwarnings('ignore', category=DeprecationWarning, module='pkg_resources')
@@ -22,8 +24,6 @@ warnings.filterwarnings('ignore', message='.*pkg_resources.*')
 
 import argostranslate.package
 import argostranslate.translate
-
-logger = logging.getLogger(__name__)
 
 
 class Translator:
@@ -52,7 +52,6 @@ class Translator:
             
             # Если языки не установлены, пытаемся установить пакет
             if not (has_ru and has_en):
-                logger.info("Russian→English translation package not found, attempting installation...")
                 available_packages = argostranslate.package.get_available_packages()
                 ru_to_en = next(
                     (pkg for pkg in available_packages 
@@ -61,16 +60,15 @@ class Translator:
                 )
                 if ru_to_en:
                     try:
-                        logger.info("Downloading and installing Russian→English translation package...")
                         argostranslate.package.install_from_path(ru_to_en.download())
-                        logger.info("Package installed successfully")
                         # Перезагружаем языки
                         argostranslate.translate.load_installed_languages()
                         installed_languages = argostranslate.translate.get_installed_languages()
                         has_ru = any(lang.code == "ru" for lang in installed_languages)
                         has_en = any(lang.code == "en" for lang in installed_languages)
-                    except Exception as install_error:
-                        logger.error(f"Failed to install translation package: {install_error}")
+                    except Exception:
+                        # Тихая обработка ошибки установки
+                        pass
             
             # Проверяем доступность перевода
             if has_ru and has_en:
@@ -79,16 +77,12 @@ class Translator:
                     translation = argostranslate.translate.get_translation_from_codes(self.from_code, self.to_code)
                     if translation:
                         self.translator_available = True
-                        logger.info("Argos Translate ru→en translation available")
-                    else:
-                        logger.warning("Translation object not available despite languages being installed")
-                except Exception as e:
-                    logger.warning(f"Could not get translation object: {e}")
-            else:
-                logger.error("Russian→English translation package not available")
+                except Exception:
+                    # Тихая обработка ошибки
+                    pass
                 
-        except Exception as e:
-            logger.error(f"Failed to initialize translation packages: {e}")
+        except Exception:
+            # Тихая обработка ошибки инициализации
             self.translator_available = False
     
     @staticmethod
@@ -115,8 +109,7 @@ class Translator:
             # Убираем множественные пробелы
             text = re.sub(r'\s+', ' ', text)
             return text.strip()
-        except Exception as e:
-            logger.error(f"HTML stripping failed: {e}")
+        except Exception:
             # Fallback: простое удаление тегов regex
             return re.sub(r'<[^>]+>', ' ', html_text).strip()
     
@@ -143,8 +136,7 @@ class Translator:
         
         try:
             return detect(text)
-        except (LangDetectException, Exception) as e:
-            logger.debug(f"Language detection failed: {e}")
+        except (LangDetectException, Exception):
             return 'en'
     
     def translate_to_english(self, text: str, source_lang: str = 'ru') -> str:
@@ -167,7 +159,6 @@ class Translator:
         
         # Если переводчик недоступен - возвращаем оригинал
         if not self.translator_available:
-            logger.warning("Translator not available, returning original text")
             return text
         
         try:
@@ -178,17 +169,14 @@ class Translator:
                 
                 # Проверяем что перевод реально произошел
                 if translated and translated != text:
-                    logger.debug(f"Translation successful: {len(text)} → {len(translated)} chars")
                     return translated
                 else:
-                    logger.warning("Translation returned original text, may indicate failure")
                     return text
             else:
-                logger.warning("Could not get translation object")
                 return text
                 
-        except Exception as e:
-            logger.error(f"Translation failed: {e}")
+        except Exception:
+            # Тихая обработка ошибки перевода
             return text
     
     def prepare_text_for_translation(self, parsed_email: dict) -> tuple:
@@ -237,7 +225,6 @@ class Translator:
             return ""
         
         detected_language = self.detect_language(combined_text)
-        logger.info(f"Detected language: {detected_language}")
         
         # Переводим только если язык русский
         if detected_language == 'ru':

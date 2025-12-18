@@ -11,6 +11,7 @@ from typing import Dict, Any, Tuple
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.preprocessing import MinMaxScaler
 import nltk
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
@@ -61,7 +62,9 @@ class FeatureExtractor:
             lowercase=True,
             strip_accents='unicode'
         )
+        self.synthetic_scaler = MinMaxScaler()
         self.is_fitted = False
+        self.is_scaler_fitted = False
     
     def extract_quantitative_features(self, parsed_email: dict) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -184,6 +187,23 @@ class FeatureExtractor:
         logger.info(f"TF-IDF vectorizer fitted on {len(texts)} texts, "
                    f"vocabulary size: {len(self.tfidf_vectorizer.vocabulary_)}")
     
+    def fit_scaler(self, synthetic_features_list: list):
+        """
+        Обучение MinMaxScaler на синтетических признаках из обучающей выборки
+        
+        Args:
+            synthetic_features_list: список массивов синтетических признаков (каждый массив - один образец)
+        """
+        if not synthetic_features_list:
+            raise ValueError("Synthetic features list cannot be empty")
+        
+        # Преобразуем в 2D массив (n_samples, n_features)
+        features_matrix = np.array(synthetic_features_list, dtype=np.float32)
+        self.synthetic_scaler.fit(features_matrix)
+        self.is_scaler_fitted = True
+        logger.info(f"Synthetic features scaler fitted on {len(synthetic_features_list)} samples, "
+                   f"feature count: {features_matrix.shape[1]}")
+    
     def vectorize_text(self, text: str) -> np.ndarray:
         """TF-IDF векторизация текста"""
         if not self.is_fitted:
@@ -228,13 +248,24 @@ class FeatureExtractor:
         binary = self.extract_binary_indicators(url_analysis)
         linguistic_norm, linguistic_raw = self.extract_linguistic_features(translated_text)
         
-        # Объединение всех синтетических признаков (нормализованные значения)
+        # Объединение всех синтетических признаков (после log1p нормализации)
         synthetic_features_array = np.concatenate([
             quantitative_norm, 
             structural_norm, 
             binary, 
             linguistic_norm
         ])
+        
+        # Дополнительная MinMax нормализация синтетических признаков к [0, 1]
+        # для совместимости с TF-IDF векторами
+        if self.is_scaler_fitted:
+            # Преобразуем в 2D для scaler (1 sample, n_features)
+            synthetic_features_2d = synthetic_features_array.reshape(1, -1)
+            synthetic_features_normalized = self.synthetic_scaler.transform(synthetic_features_2d)
+            synthetic_features_array = synthetic_features_normalized.flatten()
+        else:
+            logger.warning("Scaler not fitted. Synthetic features will not be MinMax normalized. "
+                          "Call fit_scaler() first for proper normalization.")
         
         # TF-IDF векторизация ПЕРЕВЕДЕННОГО текста
         tfidf_vector = self.vectorize_text(translated_text)
@@ -271,7 +302,7 @@ class FeatureExtractor:
         }
     
     def save_vectorizer(self, path: str):
-        """Сохранение обученного TfidfVectorizer"""
+        """Сохранение обученного TfidfVectorizer и MinMaxScaler"""
         if not self.is_fitted:
             raise ValueError("Cannot save unfitted vectorizer")
         
@@ -280,12 +311,14 @@ class FeatureExtractor:
         with open(path, 'wb') as f:
             pickle.dump({
                 'vectorizer': self.tfidf_vectorizer, 
-                'is_fitted': self.is_fitted
+                'is_fitted': self.is_fitted,
+                'scaler': self.synthetic_scaler,
+                'is_scaler_fitted': self.is_scaler_fitted
             }, f)
-        logger.info(f"Vectorizer saved to {path}")
+        logger.info(f"Vectorizer and scaler saved to {path}")
     
     def load_vectorizer(self, path: str):
-        """Загрузка обученного TfidfVectorizer"""
+        """Загрузка обученного TfidfVectorizer и MinMaxScaler"""
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Vectorizer file not found: {path}")
@@ -294,6 +327,15 @@ class FeatureExtractor:
             data = pickle.load(f)
             self.tfidf_vectorizer = data['vectorizer']
             self.is_fitted = data.get('is_fitted', True)
+            # Поддержка обратной совместимости: если scaler нет в файле, создаем новый
+            if 'scaler' in data:
+                self.synthetic_scaler = data['scaler']
+                self.is_scaler_fitted = data.get('is_scaler_fitted', False)
+            else:
+                self.synthetic_scaler = MinMaxScaler()
+                self.is_scaler_fitted = False
+                logger.warning("Scaler not found in saved file. New scaler created. Call fit_scaler() to train it.")
         
         vocab_size = len(self.tfidf_vectorizer.vocabulary_) if hasattr(self.tfidf_vectorizer, 'vocabulary_') else 0
-        logger.info(f"Vectorizer loaded from {path}, vocabulary size: {vocab_size}")
+        logger.info(f"Vectorizer loaded from {path}, vocabulary size: {vocab_size}, "
+                   f"scaler fitted: {self.is_scaler_fitted}")
