@@ -7,7 +7,9 @@ import re
 import logging
 import pickle
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List, Optional
+from urllib.parse import urlparse
+import tldextract
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -16,6 +18,9 @@ import nltk
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
+from bs4 import BeautifulSoup
+
+from .utils import IP_PATTERN, extract_hostname_from_url
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +44,15 @@ URGENCY_KEYWORDS = {
     'verify account', 'verify email', 'click here', 'click now',
     'limited time', 'limited offer', 'act now', 'don\'t miss'
 }
+
+# Константы для анализа доменов (только из текста)
+SUSPICIOUS_TLDS = {
+    '.xin', '.win', '.help', '.bond', '.cfd', '.finance',
+    '.top', '.xyz', '.icu', '.support', '.vip', '.pro', '.sbs',
+    '.site', '.online', '.click', '.tk', '.ml', '.ga', '.cf',
+    '.gq', '.club', '.work'
+}
+LONG_DOMAIN_THRESHOLD = 20
 
 
 class FeatureExtractor:
@@ -66,9 +80,149 @@ class FeatureExtractor:
         self.is_fitted = False
         self.is_scaler_fitted = False
     
+    @staticmethod
+    def strip_html_tags(html_text: str) -> str:
+        """
+        Удаление HTML-тегов и извлечение чистого текста
+        
+        Args:
+            html_text: HTML-разметка
+            
+        Returns:
+            str: очищенный текст без тегов
+        """
+        if not html_text or not isinstance(html_text, str):
+            return ""
+        
+        # Заменяем nbsp как подстроку на пробел
+        html_text = html_text.replace('nbsp', ' ')
+        
+        try:
+            soup = BeautifulSoup(html_text, 'html.parser')
+            # Удаляем script и style блоки
+            for script in soup(["script", "style"]):
+                script.decompose()
+            # Извлекаем текст
+            text = soup.get_text(separator=' ', strip=True)
+            # Заменяем nbsp как подстроку на пробел
+            text = text.replace('nbsp', ' ')
+            # Убираем множественные пробелы
+            text = re.sub(r'\s+', ' ', text)
+            return text.strip()
+        except Exception:
+            # Fallback: простое удаление тегов regex
+            text = re.sub(r'<[^>]+>', ' ', html_text)
+            # Заменяем nbsp как подстроку на пробел
+            text = text.replace('nbsp', ' ')
+            text = re.sub(r'\s+', ' ', text)
+            return text.strip()
+    
+    @staticmethod
+    def prepare_text_from_parsed_email(parsed_email: dict) -> str:
+        """
+        Подготовка текста из распарсенного письма для векторизации:
+        - Очистка HTML тегов из body_html и body_plain (если содержит HTML)
+        - Объединение subject и body
+        
+        Args:
+            parsed_email: результат email_parser.parse_email()
+            
+        Returns:
+            str: объединенный очищенный текст (subject + body)
+        """
+        subject = parsed_email.get('subject', '') or ''
+        body_plain = parsed_email.get('body_plain', '') or ''
+        body_html = parsed_email.get('body_html', '') or ''
+        
+        # Объединяем body_plain и body_html (если оба есть)
+        body_combined = ''
+        if body_plain and body_html:
+            # Если есть оба, объединяем их
+            body_combined = f"{body_plain} {body_html}"
+        elif body_plain:
+            body_combined = body_plain
+        elif body_html:
+            body_combined = body_html
+        
+        # ВСЕГДА очищаем HTML теги, даже если был body_plain
+        # (body_plain может содержать HTML теги в некоторых случаях)
+        if body_combined:
+            body_clean = FeatureExtractor.strip_html_tags(body_combined)
+        else:
+            body_clean = ''
+        
+        # Объединяем subject и body
+        combined_text = f"{subject} {body_clean}".strip()
+        return combined_text
+    
+    @staticmethod
+    def _extract_ips_from_urls(urls: List[str]) -> List[str]:
+        """
+        Извлечение IP-адресов только из URL (только из текста письма)
+        
+        Args:
+            urls: список URL из тела письма
+            
+        Returns:
+            List[str]: список уникальных IP-адресов
+        """
+        ips = []
+        for url in urls:
+            hostname, is_ip = extract_hostname_from_url(url)
+            if is_ip and hostname:
+                # Валидация IP-адреса
+                parts = hostname.split('.')
+                if len(parts) == 4:
+                    try:
+                        if all(0 <= int(part) <= 255 for part in parts):
+                            ips.append(hostname)
+                    except ValueError:
+                        continue
+        return list(set(ips))
+    
+    @staticmethod
+    def _extract_domains_from_urls(urls: List[str]) -> List[str]:
+        """
+        Извлечение доменов только из URL (только из текста письма)
+        
+        Args:
+            urls: список URL из тела письма
+            
+        Returns:
+            List[str]: список уникальных доменов
+        """
+        domains = []
+        for url in urls:
+            hostname, is_ip = extract_hostname_from_url(url)
+            if not is_ip and hostname:
+                # Удаляем www. префикс
+                domain = hostname[4:] if hostname.lower().startswith('www.') else hostname
+                domain = domain.lower()
+                # Проверяем, что это валидный домен
+                if re.match(r'^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$', domain):
+                    domains.append(domain)
+        return list(set(domains))
+    
+    @staticmethod
+    def _is_long_domain(domain: str) -> bool:
+        """Проверяет, превышает ли домен порог длины"""
+        return len(domain) > LONG_DOMAIN_THRESHOLD
+    
+    @staticmethod
+    def _is_suspicious_tld(domain: str) -> bool:
+        """Проверяет TLD на вхождение в список подозрительных зон"""
+        try:
+            extracted = tldextract.extract(domain)
+            tld = f".{extracted.suffix}" if extracted.suffix else ""
+        except Exception:
+            parts = domain.split('.')
+            tld = f".{parts[-1]}" if len(parts) > 1 else ""
+        return tld.lower() in SUSPICIOUS_TLDS
+    
     def extract_quantitative_features(self, parsed_email: dict) -> Tuple[np.ndarray, np.ndarray]:
         """
         Извлечение количественных метрик: counts URL/attachments/IPs
+        IP извлекаются только из URL в теле письма (только из текста)
         Применяется логарифмическая нормализация (log1p) для совместимости с TF-IDF векторами
         
         Args:
@@ -77,9 +231,12 @@ class FeatureExtractor:
         Returns:
             tuple: (normalized_features, raw_features)
         """
-        url_count = len(parsed_email.get('urls', []))
+        urls = parsed_email.get('urls', []) or []
+        url_count = len(urls)
         attachment_count = len(parsed_email.get('attachments', []))
-        ip_count = len(parsed_email.get('ips', []))
+        # IP извлекаются только из URL в теле письма
+        ips_from_urls = self._extract_ips_from_urls(urls)
+        ip_count = len(ips_from_urls)
         
         raw_features = np.array([url_count, attachment_count, ip_count], dtype=np.float32)
         # Логарифмическая нормализация: log(1 + x)
@@ -109,20 +266,30 @@ class FeatureExtractor:
         normalized_features = np.log1p(raw_features)
         return normalized_features, raw_features
     
-    def extract_binary_indicators(self, url_analysis: dict) -> np.ndarray:
+    def extract_binary_indicators(self, url_analysis: dict, parsed_email: dict) -> np.ndarray:
         """
-        Извлечение бинарных индикаторов с использованием результатов url_domain_analyzer
+        Извлечение бинарных индикаторов
+        has_long_domain и has_suspicious_tld анализируются только из доменов URL в теле письма (только из текста)
         
         Args:
             url_analysis: результат url_domain_analyzer.analyze_urls_and_domains()
+            parsed_email: результат email_parser.parse_email() (для извлечения доменов только из URL)
         
         Returns:
             np.ndarray: [has_url_shortener, has_long_domain, has_suspicious_tld, has_ip_in_url]
         """
         has_url_shortener = 1 if url_analysis.get('has_url_shortener', False) else 0
-        has_long_domain = 1 if url_analysis.get('has_long_domain', False) else 0
-        has_suspicious_tld = 1 if url_analysis.get('has_suspicious_tld', False) else 0
         has_ip_in_url = 1 if url_analysis.get('has_ip_in_url', False) else 0
+        
+        # Домены извлекаются только из URL в теле письма (только из текста)
+        urls = parsed_email.get('urls', []) or []
+        domains_from_urls = self._extract_domains_from_urls(urls)
+        
+        # Проверяем наличие длинных доменов только из URL
+        has_long_domain = 1 if any(self._is_long_domain(domain) for domain in domains_from_urls) else 0
+        
+        # Проверяем наличие подозрительных TLD только из URL
+        has_suspicious_tld = 1 if any(self._is_suspicious_tld(domain) for domain in domains_from_urls) else 0
         
         return np.array([
             has_url_shortener,
@@ -156,9 +323,20 @@ class FeatureExtractor:
         return normalized_features, raw_features
     
     def preprocess_text(self, text: str) -> str:
-        """Предобработка текста: токенизация, лемматизация, удаление стоп-слов"""
+        """
+        Предобработка текста: очистка HTML, токенизация, лемматизация, удаление стоп-слов
+        """
         if not text:
             return ""
+        
+        # Дополнительная очистка HTML тегов (на случай, если они все еще есть)
+        # Проверяем наличие HTML тегов
+        if '<' in text and '>' in text:
+            text = FeatureExtractor.strip_html_tags(text)
+        
+        # Заменяем nbsp как подстроку на пробел
+        text = text.replace('nbsp', ' ')
+        text = re.sub(r'\s+', ' ', text)  # множественные пробелы в один
         
         try:
             tokens = word_tokenize(text.lower())
@@ -232,7 +410,7 @@ class FeatureExtractor:
         
         Args:
             parsed_email: результат email_parser.parse_email() (плоская структура)
-            translated_text: ПЕРЕВЕДЕННЫЙ текст из translation.translate_parsed_email()
+            translated_text: ПЕРЕВЕДЕННЫЙ текст из translation.translate_text() (после prepare_text_from_parsed_email())
             url_analysis: результат url_domain_analyzer.analyze_urls_and_domains()
         
         Returns:
@@ -245,7 +423,7 @@ class FeatureExtractor:
         # Извлечение синтетических признаков
         quantitative_norm, quantitative_raw = self.extract_quantitative_features(parsed_email)
         structural_norm, structural_raw = self.extract_structural_features(parsed_email)
-        binary = self.extract_binary_indicators(url_analysis)
+        binary = self.extract_binary_indicators(url_analysis, parsed_email)
         linguistic_norm, linguistic_raw = self.extract_linguistic_features(translated_text)
         
         # Объединение всех синтетических признаков (после log1p нормализации)
