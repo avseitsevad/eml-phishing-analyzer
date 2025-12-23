@@ -34,6 +34,18 @@ for resource in ['tokenizers/punkt', 'corpora/stopwords', 'corpora/wordnet']:
 lemmatizer = WordNetLemmatizer()
 STOP_WORDS = set(stopwords.words('english'))
 
+# Артефакты датасета - слова, специфичные для конкретных датасетов, которые не должны попадать в TF-IDF признаки
+DATASET_ARTIFACTS = {
+    'jose',      # Имя из тестовых данных Nazario
+    'enron',     # Название компании из Enron датасета
+    'ect',       # Сокращение из Enron датасета (может быть "etc" с опечаткой)
+    'monkey',    # Часть домена monkey.org из тестовых данных
+    'org'        # Часть доменов .org (фильтруется только как отдельное слово)
+}
+
+# Объединяем стоп-слова и артефакты датасета
+ALL_STOP_WORDS = STOP_WORDS | DATASET_ARTIFACTS
+
 # Ключевые слова срочности (английские - т.к. текст уже переведен)
 URGENCY_KEYWORDS = {
     'urgent', 'immediately', 'asap', 'as soon as possible', 'hurry',
@@ -325,6 +337,7 @@ class FeatureExtractor:
     def preprocess_text(self, text: str) -> str:
         """
         Предобработка текста: очистка HTML, токенизация, лемматизация, удаление стоп-слов
+        и артефактов датасета
         """
         if not text:
             return ""
@@ -349,7 +362,8 @@ class FeatureExtractor:
             if not re.match(r'^[a-zA-Z]+$', token):
                 continue
             lemmatized = lemmatizer.lemmatize(token)
-            if lemmatized not in STOP_WORDS and len(lemmatized) > 2:
+            # Фильтруем стоп-слова И артефакты датасета
+            if lemmatized not in ALL_STOP_WORDS and len(lemmatized) > 2:
                 processed_tokens.append(lemmatized)
         
         return ' '.join(processed_tokens)
@@ -505,7 +519,6 @@ class FeatureExtractor:
             data = pickle.load(f)
             self.tfidf_vectorizer = data['vectorizer']
             self.is_fitted = data.get('is_fitted', True)
-            # Поддержка обратной совместимости: если scaler нет в файле, создаем новый
             if 'scaler' in data:
                 self.synthetic_scaler = data['scaler']
                 self.is_scaler_fitted = data.get('is_scaler_fitted', False)

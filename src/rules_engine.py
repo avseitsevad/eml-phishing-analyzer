@@ -15,12 +15,12 @@ DANGEROUS_EXTENSIONS = {
 
 # Веса правил
 RULE_WEIGHTS = {
-    'spf_fail': 15,
-    'dkim_fail': 15,
+    'spf_fail': 10,
+    'dkim_fail': 10,
     'dmarc_fail': 10,
-    'domain_mismatch': 20,
-    'domain_in_ti_db': 25,
-    'ip_in_ti_db': 25,
+    'domain_mismatch': 10,
+    'domain_in_ti_db': 35,
+    'ip_in_ti_db': 35,
     'reply_anomaly': 10,
     'received_hops_anomaly': 15,
     'dangerous_attachments': 20,
