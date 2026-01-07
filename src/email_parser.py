@@ -1,8 +1,7 @@
 """
 Email Parser Module
 
-Модуль парсинга email сообщений для системы детектирования фишинга.
-Использует стандартную библиотеку email.parser
+Модуль парсинга email сообщений 
 Поддерживает .eml файлы с декодированием UTF-8, Windows-1251, KOI8-R.
 
 Основные функции:
@@ -17,7 +16,6 @@ Email Parser Module
 - URL-адреса, домены и IP-адреса из текста, HTML и заголовков
 """
 
-import logging
 import hashlib
 import re
 from pathlib import Path
@@ -43,27 +41,12 @@ import tldextract
 DOMAIN_PATTERN = re.compile(r'^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$', re.IGNORECASE)
 RECEIVED_DOMAIN_PATTERN = re.compile(r'from\s+((?:[a-z0-9](?:[a-z0-9\-]{0,61}[a-z0-9])?\.)+[a-z]{2,})', re.IGNORECASE)
 
-
 url_extractor = URLExtract()
-logger = logging.getLogger(__name__)
 
-
-def load_eml_file(file_input: Union[str, Path, Any]) -> str:
+def load_eml_file(file_input: Union[str, Path, Any]) -> bytes:
     """
-    Чтение файлового объекта/пути, декодирование с поддержкой UTF-8, 
-    Windows-1251, KOI8-R, базовая валидация структуры.
-    
-    Args:
-        file_input: Путь к файлу или файловый объект
-        
-    Returns:
-        str: Содержимое письма как строка
-        
-    Raises:
-        FileNotFoundError: Если файл не найден
-        ValueError: Если файл невалиден или слишком короткий
+    Чтение файла и возврат содержимого как bytes для корректного парсинга.
     """
-    # Чтение файла
     if isinstance(file_input, (str, Path)):
         path = Path(file_input)
         if not path.exists():
@@ -77,52 +60,53 @@ def load_eml_file(file_input: Union[str, Path, Any]) -> str:
     else:
         raise ValueError(f"Unsupported input type: {type(file_input)}")
     
-    # Декодирование с поддержкой UTF-8, Windows-1251, KOI8-R
-    content_str = decode_text(content_bytes)
+    # Базовая валидация - проверка на наличие заголовков
+    try:
+        content_str = content_bytes.decode('utf-8', errors='ignore')
+        if not validate_eml_format(content_str):
+            raise ValueError("Provided content is not a valid .eml message")
+    except Exception:
+        raise ValueError("Failed to decode .eml content")
     
-    # Валидация формата .eml
-    if not validate_eml_format(content_str):
-        raise ValueError("Provided content is not a valid .eml message")
-    
-    return content_str
+    return content_bytes
+
 
 
 def extract_headers(message: EmailMessage) -> Dict[str, Any]:
-    """
-    Извлекаемые заголовки:
-    - Основные: From, To, Subject, Date, Message-ID
-    - Маршрутизация: Received, Reply-To, Return-Path, References
-    - Аутентификация: Authentication-Results
-    - MIME: Content-Type (для определения структуры письма)
-    
-    Все заголовки возвращаются как строки (кроме 'received', который возвращается как список строк).
-    """
+    """Извлечение заголовков с нормализацией имен."""
     headers = {}
-    required_headers = [
-        'from', 'to', 'subject', 'date', 'message-id',
-        'received', 'authentication-results', 
-        'reply-to', 'return-path', 'references',
-        'content-type'
-    ]
     
-    for header_name in required_headers:
-        if header_name == 'received':
-            values = message.get_all(header_name)
+    # Маппинг для нормализации имен заголовков
+    header_mapping = {
+        'from': 'From',
+        'to': 'To',
+        'subject': 'Subject',
+        'date': 'Date',
+        'message-id': 'Message-ID',
+        'received': 'Received',
+        'authentication-results': 'Authentication-Results',
+        'reply-to': 'Reply-To',
+        'return-path': 'Return-Path',
+        'references': 'References',
+        'content-type': 'Content-Type'
+    }
+    
+    for key, header_name in header_mapping.items():
+        if key == 'received':
+            values = message.get_all(header_name, [])
             if values:
-                headers[header_name] = [str(v) if v else '' for v in values]
+                headers[key] = [str(v).strip() if v else '' for v in values]
         else:
-            value = message.get(header_name)
+            value = message.get(header_name, '')
             if value:
-                headers[header_name] = str(value)
+                headers[key] = str(value).strip()
     
     return headers
 
 
+
 def extract_body(message: EmailMessage) -> Dict[str, str]:
-    """
-    Извлечение тела письма: text/plain и text/html.
-    Обрабатывает multipart структуры (alternative, mixed, related).
-    """
+    """Извлечение тела письма: text/plain и text/html"""
     body = {'text': '', 'html': ''}
     
     if message.is_multipart():
@@ -159,12 +143,11 @@ def extract_body(message: EmailMessage) -> Dict[str, str]:
 
 def extract_attachments_metadata(message: EmailMessage, max_attachment_size: int = 50 * 1024 * 1024) -> List[Dict[str, Any]]:
     """
-    Извлечение метаданных вложений.
-    Не сохраняет файлы на диск - только метаданные.
+    Извлечение метаданных вложений
     
     Args:
         message: EmailMessage объект
-        max_attachment_size: максимальный размер вложения в байтах (по умолчанию 50MB)
+        max_attachment_size: максимальный размер вложения в байтах
     
     Returns:
         List[Dict]: список метаданных вложений
@@ -181,8 +164,6 @@ def extract_attachments_metadata(message: EmailMessage, max_attachment_size: int
             filename = part.get_filename()
             content_type = part.get_content_type()
             
-            # Проверяем размер перед декодированием
-            # Пытаемся получить размер без полной загрузки в память
             try:
                 payload = part.get_payload(decode=True)
                 if payload is None:
@@ -191,11 +172,7 @@ def extract_attachments_metadata(message: EmailMessage, max_attachment_size: int
                 else:
                     size = len(payload)
                     
-                    # Пропускаем слишком большие вложения для предотвращения утечки памяти
                     if size > max_attachment_size:
-                        logger.warning(
-                            f"Вложение {filename} пропущено: размер {size} байт превышает лимит {max_attachment_size} байт"
-                        )
                         attachments.append({
                             'filename': filename or 'unknown',
                             'content_type': content_type,
@@ -206,8 +183,7 @@ def extract_attachments_metadata(message: EmailMessage, max_attachment_size: int
                         continue
                     
                     sha256_hash = hashlib.sha256(payload).hexdigest()
-            except Exception as e:
-                logger.error(f"Ошибка при обработке вложения {filename}: {e}")
+            except Exception:
                 size = 0
                 sha256_hash = ''
             
@@ -222,10 +198,7 @@ def extract_attachments_metadata(message: EmailMessage, max_attachment_size: int
 
 
 def extract_urls(message: EmailMessage, body: Optional[Dict[str, str]] = None) -> List[str]:
-    """
-    Извлечение URL из текста и HTML.
-    Использует urlextract и BeautifulSoup для парсинга HTML.
-    """
+    """Извлечение URL из текста и HTML"""
     urls = []
     
     if body is None:
@@ -263,15 +236,7 @@ def extract_domains(
     headers: Optional[Dict[str, Any]] = None,
     urls: Optional[List[str]] = None
 ) -> Dict[str, List[str]]:
-    """
-    Извлечение доменов и IP-адресов из:
-    - URL в теле письма (с поддоменами 2, 3 и более уровней)
-    - Email адресов в заголовках (From, To, Reply-To, Return-Path)
-    - Заголовков Received
-    
-    Домены извлекаются целиком с сохранением всех уровней поддоменов.
-    Префикс 'www.' автоматически удаляется из доменов.
-    """
+    """Извлечение доменов и IP-адресов из URL, заголовков и email адресов"""
     domains: List[str] = []
     ips: List[str] = []
     
@@ -342,40 +307,22 @@ def extract_domains(
 
 
 @timing_decorator
-def parse_email(email_string: str) -> Dict[str, Any]:
+def parse_email(email_input: Union[str, bytes]) -> Dict[str, Any]:
     """
-    Парсинг структуры RFC 5322 + MIME.
-    Принимает строку с содержимым email и возвращает словарь с распарсенными данными.
-    
-    Args:
-        email_string: Строка с содержимым .eml файла
-        
-    Returns:
-        Dict с полями:
-        - from, to, reply_to, return_path, subject, date, message_id, references
-        - body_plain, body_html
-        - auth_results
-        - received_headers (list)
-        - attachments (list of dicts with 'name', 'type', 'size', 'sha256')
-        - urls (list)
-        - domains (list)
-        - ips (list)
-        
-    Raises:
-        TypeError: Если email_string не является строкой
-        ValueError: Если парсер вернул пустое сообщение
+    Парсинг email из строки или bytes.
     """
-    # Валидация типа входных данных
-    if not isinstance(email_string, str):
-        raise TypeError(f"Expected str for email_string, got {type(email_string).__name__}")
+    # Определяем тип входных данных
+    if isinstance(email_input, str):
+        email_bytes = email_input.encode('utf-8', errors='replace')
+    elif isinstance(email_input, bytes):
+        email_bytes = email_input
+    else:
+        raise TypeError(f"Expected str or bytes, got {type(email_input).__name__}")
     
-    if not email_string or not email_string.strip():
-        raise ValueError("email_string cannot be empty")
+    if not email_bytes or not email_bytes.strip():
+        raise ValueError("Email content cannot be empty")
     
-    # Конвертация строки в bytes для парсинга
-    email_bytes = email_string.encode('utf-8', errors='replace')
-    
-    # Парсинг через стандартную библиотеку email.parser
+    # Парсинг
     parser = BytesParser(policy=default)
     message = parser.parsebytes(email_bytes)
     
@@ -387,10 +334,8 @@ def parse_email(email_string: str) -> Dict[str, Any]:
     body = extract_body(message)
     urls = extract_urls(message, body=body)
     attachments_metadata = extract_attachments_metadata(message)
-    # Передаем уже извлеченные headers и urls 
     domains_info = extract_domains(message, headers=headers, urls=urls)
     
-    # Формирование результата в требуемом формате
     result = {
         'from': headers.get('from', ''),
         'to': headers.get('to', ''),
@@ -420,18 +365,4 @@ def parse_email(email_string: str) -> Dict[str, Any]:
     
     return result
 
-
-if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    print("Email Parser Module v2 - email.parser based")
-    print("="*60)
-    print("Features:")
-    print("  - RFC 5322/2045-2049 compliant")
-    print("  - Direct access to all headers including Content-Type")
-    print("  - Proper multipart handling (mixed/alternative/и )")
-    print("  - In-memory attachment processing with SHA-256 hashes")
-    print("  - URL and domain extraction")
 

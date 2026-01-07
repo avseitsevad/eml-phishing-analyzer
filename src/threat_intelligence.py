@@ -4,15 +4,11 @@ Threat Intelligence Module
 """
 
 import sqlite3
-import logging
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Optional, List, Any
 
 from .utils import normalize_domain_for_ti
-
-# Настройка логирования
-logger = logging.getLogger(__name__)
 
 
 class ThreatIntelligence:
@@ -43,7 +39,6 @@ class ThreatIntelligence:
         
         self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        logger.info(f"Подключение к базе данных установлено: {self.db_path}")
     
     def create_database_schema(self):
         """Создание схемы базы данных"""
@@ -78,7 +73,6 @@ class ThreatIntelligence:
         """)
         
         self.conn.commit()
-        logger.info("Схема базы данных создана/проверена")
     
     def check_domain_reputation(self, domain: str) -> dict:
         """Проверка домена в локальной базе индикаторов"""
@@ -91,7 +85,6 @@ class ThreatIntelligence:
         
         cache_key = f"domain:{normalized_domain}"
         if cache_key in self.cache:
-            # Перемещаем в конец (самый недавно использованный)
             self.cache.move_to_end(cache_key)
             return self.cache[cache_key]
         
@@ -115,12 +108,11 @@ class ThreatIntelligence:
             
             # LRU кэш: удаляем самую старую запись при превышении лимита
             if len(self.cache) >= self.max_cache_size:
-                self.cache.popitem(last=False)  # Удаляем самую старую запись (FIFO)
+                self.cache.popitem(last=False)  # Удаляем самую старую запись 
             
             self.cache[cache_key] = reputation
             return reputation
-        except sqlite3.Error as e:
-            logger.error(f"Database error in check_domain_reputation: {e}")
+        except sqlite3.Error:
             return {'found': False, 'threat_type': 'clean', 'source': None}
     
     def check_ip_reputation(self, ip_address: str) -> dict:
@@ -130,7 +122,6 @@ class ThreatIntelligence:
         
         cache_key = f"ip:{ip_address}"
         if cache_key in self.cache:
-            # Перемещаем в конец (самый недавно использованный)
             self.cache.move_to_end(cache_key)
             return self.cache[cache_key]
         
@@ -152,14 +143,12 @@ class ThreatIntelligence:
             else:
                 reputation = {'found': False, 'threat_type': 'clean', 'source': None}
             
-            # LRU кэш: удаляем самую старую запись при превышении лимита
             if len(self.cache) >= self.max_cache_size:
-                self.cache.popitem(last=False)  # Удаляем самую старую запись (FIFO)
+                self.cache.popitem(last=False)
             
             self.cache[cache_key] = reputation
             return reputation
-        except sqlite3.Error as e:
-            logger.error(f"Database error in check_ip_reputation: {e}")
+        except sqlite3.Error:
             return {'found': False, 'threat_type': 'clean', 'source': None}
     
     def check_domains_batch(self, domains: List[str]) -> Dict[str, Any]:
@@ -218,8 +207,7 @@ class ThreatIntelligence:
                     'threat_type': row['threat_type'],
                     'source': row['source']
                 }
-        except sqlite3.Error as e:
-            logger.error(f"Database error in check_domains_batch: {e}")
+        except sqlite3.Error:
             return {
                 'malicious_domains': [],
                 'domain_in_urlhaus': False,
@@ -246,12 +234,10 @@ class ThreatIntelligence:
                         'threat_type': found_domains_info[norm_domain]['threat_type'] or 'malicious',
                         'source': source
                     }
-                    # LRU кэш: удаляем самую старую запись при превышении лимита
                     if len(self.cache) >= self.max_cache_size:
-                        self.cache.popitem(last=False)  # Удаляем самую старую запись (FIFO)
+                        self.cache.popitem(last=False)
                     self.cache[cache_key] = reputation
                 else:
-                    # Перемещаем в конец (самый недавно использованный)
                     self.cache.move_to_end(cache_key)
         
         return {
@@ -276,7 +262,6 @@ class ThreatIntelligence:
             - domain_in_openphish: bool
             - ip_in_blacklist: bool
         """
-        # Валидация
         domains = domains or []
         ips = ips or []
         
@@ -285,10 +270,8 @@ class ThreatIntelligence:
         if not isinstance(ips, list):
             ips = []
         
-        # Проверка доменов (пакетная)
         domains_result = self.check_domains_batch(domains)
         
-        # Проверка IP
         malicious_ips = []
         ip_in_blacklist = False
         
@@ -322,11 +305,9 @@ class ThreatIntelligence:
     def clear_cache(self):
         """Очистка кэша результатов"""
         self.cache.clear()
-        logger.debug("Кэш результатов очищен")
     
     def close(self):
         """Закрытие подключения к базе данных"""
         if self.conn:
             self.conn.close()
             self.conn = None
-            logger.info("Подключение к базе данных закрыто")

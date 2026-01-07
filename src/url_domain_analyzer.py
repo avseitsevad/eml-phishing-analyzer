@@ -7,7 +7,6 @@ URL&Domain Analyzer Module
 """
 
 import re
-import logging
 from typing import Dict, List, Optional, Tuple, Any
 import tldextract
 from urllib.parse import urlparse
@@ -17,9 +16,6 @@ from .utils import (
     URL_SHORTENERS,
     IP_PATTERN
 )
-
-# Настройка логирования
-logger = logging.getLogger(__name__)
 
 # Константы для анализа доменов
 SUSPICIOUS_TLDS = {
@@ -73,9 +69,7 @@ def is_private_ip(ip: str) -> bool:
 
 def detect_ip_in_url(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
     """
-    Детектирование IP-адреса вместо домена в URL.
-    
-    Правило: Если в URL используется IP-адрес — критически подозрительно
+    Детектирование IP-адреса вместо домена в URL
     
     Args:
         url: URL-адрес
@@ -91,7 +85,6 @@ def detect_ip_in_url(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
             'found': False
         }
     
-    # Берем первый найденный IP
     ip = matches[0]
     
     parts = ip.split('.')
@@ -119,9 +112,7 @@ def detect_ip_in_url(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
 
 def detect_url_shorteners(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]]:
     """
-    Обнаружение URL-shorteners.
-    
-    Правило: Проверка домена на вхождение в список URL shorteners
+    Обнаружение URL-shorteners
     
     Args:
         url: URL-адрес
@@ -149,12 +140,10 @@ def detect_url_shorteners(url: str) -> Tuple[bool, Optional[str], Dict[str, Any]
             'rule': 'url_shortener',
             'found': False
         }
-    except Exception as e:
-        logger.debug(f"Ошибка при проверке URL shortener для {url}: {e}")
+    except Exception:
         return False, None, {
             'rule': 'url_shortener',
-            'found': False,
-            'error': str(e)
+            'found': False
         }
 
 
@@ -166,9 +155,7 @@ def is_long_domain(domain: str) -> bool:
 
 
 def is_suspicious_tld(domain: str) -> bool:
-    """
-    Проверяет TLD на вхождение в расширенный список подозрительных зон.
-    """
+    """Проверяет TLD на вхождение в список подозрительных зон"""
     try:
         extracted = tldextract.extract(domain)
         tld = f".{extracted.suffix}" if extracted.suffix else ""
@@ -202,18 +189,15 @@ def has_shortened_url(urls: List[str]) -> bool:
 
 def _extract_entities(parsed_email_data: Dict[str, Any]) -> Tuple[List[str], List[str], List[str]]:
     """
-    Извлекает списки URL, доменов и IP из результата email_parser.parse_email().
+    Извлекает списки URL, доменов и IP из результата email_parser.parse_email()
     
-    email_parser.parse_email() возвращает:
-    - 'urls': список строк
-    - 'domains': список строк
-    - 'ips': список строк
+    Returns:
+        tuple: (domains, urls, ips)
     """
     urls = parsed_email_data.get('urls', []) or []
     domains = parsed_email_data.get('domains', []) or []
     ips = parsed_email_data.get('ips', []) or []
     
-    # Гарантируем, что это списки
     if not isinstance(domains, list):
         domains = []
     if not isinstance(urls, list):
@@ -227,10 +211,7 @@ def _extract_entities(parsed_email_data: Dict[str, Any]) -> Tuple[List[str], Lis
 @timing_decorator
 def analyze_urls_and_domains(parsed_email_data: Dict[str, Any]) -> Dict[str, bool]:
     """
-    Главная функция для анализа URL и доменов.
-    
-    Самостоятельно извлекает данные из структуры, возвращаемой email_parser,
-    и рассчитывает четыре бинарных признака для FeatureExtractor.
+    Анализ URL и доменов
     
     Args:
         parsed_email_data: Результат вызова email_parser.parse_email()
@@ -246,15 +227,5 @@ def analyze_urls_and_domains(parsed_email_data: Dict[str, Any]) -> Dict[str, boo
         'has_suspicious_tld': any(is_suspicious_tld(domain) for domain in domains),
         'has_ip_in_url': has_ip_based_url(urls)
     }
-    
-    logger.info(
-        "Структурный анализ: %s",
-        {
-            'domains_checked': len(domains),
-            'urls_checked': len(urls),
-            'ips_checked': len(ips),
-            **flags
-        }
-    )
     
     return flags

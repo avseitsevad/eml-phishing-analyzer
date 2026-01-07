@@ -21,7 +21,7 @@ from typing import Any, Dict, Callable, Optional, Union, Tuple
 from urllib.parse import urlparse
 import tldextract
 
-# Общие константы для проекта (используются в 2+ модулях)
+# Общие константы для проекта
 URL_SHORTENERS = {
     'bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly', 
     'cutt.ly', 'rb.gy', 'j.mp', 'tiny.cc', 'short.link',
@@ -74,13 +74,8 @@ def setup_logging(
     if log_format is None:
         log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     
-    # Настройка формата даты
     date_format = '%Y-%m-%d %H:%M:%S'
-    
-    # Настройка уровня логирования
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
-    
-    # Базовая конфигурация
     handlers = [logging.StreamHandler()]
     
     if log_file:
@@ -116,10 +111,7 @@ def extract_hostname_from_url(url: str) -> Tuple[Optional[str], bool]:
         if not hostname:
             return None, False
         
-        # Удаляем порт
         hostname = hostname.rsplit(':', 1)[0] if ':' in hostname else hostname
-        
-        # Проверяем, является ли IP-адресом
         is_ip = bool(IP_PATTERN.match(hostname))
         return hostname, is_ip
     except Exception:
@@ -145,8 +137,7 @@ def normalize_domain(hostname: str) -> Optional[str]:
 
 def normalize_domain_for_ti(domain: str) -> Optional[str]:
     """
-    Нормализует домен для Threat Intelligence проверки.
-    Возвращает domain.suffix в нижнем регистре.
+    Нормализует домен для Threat Intelligence проверки
     
     Args:
         domain: домен для нормализации
@@ -186,12 +177,10 @@ def validate_eml_format(email_content: Union[str, bytes]) -> bool:
         
         lines = email_content.split('\n')
         
-        # Должны быть заголовки
         has_headers = False
         header_end = False
         
         for i, line in enumerate(lines):
-            # Проверка на пустую строку (разделитель заголовков и тела)
             if not line.strip():
                 header_end = True
                 if i > 0:
@@ -208,15 +197,13 @@ def validate_eml_format(email_content: Union[str, bytes]) -> bool:
         if not has_headers:
             return False
         
-        # Проверка наличия обязательных заголовков (хотя бы одного из основных)
         required_headers = ['From', 'To', 'Subject', 'Date']
         email_lower = email_content.lower()
         has_required = any(f'{header.lower()}:' in email_lower for header in required_headers)
         
         return has_required
         
-    except Exception as e:
-        logging.warning(f"Ошибка при валидации .eml формата: {e}")
+    except Exception:
         return False
 
 
@@ -225,7 +212,7 @@ def _decode_with_encoding(
     encodings: list
 ) -> tuple[str, str]:
     """
-    Внутренняя функция для декодирования текста с возвратом текста и кодировки.
+    Декодирование текста с возвратом текста и кодировки
     
     Args:
         text: Текст для декодирования (строка или байты)
@@ -248,7 +235,6 @@ def _decode_with_encoding(
         for encoding in encodings:
             try:
                 decoded = text.decode(encoding, errors='replace')
-                logging.warning(f"Декодирование с заменой ошибок в {encoding}")
                 return decoded, encoding
             except LookupError:
                 continue
@@ -263,8 +249,7 @@ def decode_text(
     encodings: list = ['utf-8', 'windows-1251', 'koi8-r']
 ) -> str:
     """
-    Обрабатывает различные кодировки текста.
-    Пробует декодировать текст в указанных кодировках.
+    Декодирование текста в указанных кодировках
     
     Args:
         text: Текст для декодирования (строка или байты)
@@ -272,9 +257,6 @@ def decode_text(
         
     Returns:
         str: Декодированный текст в UTF-8
-        
-    Raises:
-        UnicodeDecodeError: Если не удалось декодировать ни в одной кодировке
     """
     decoded, _ = _decode_with_encoding(text, encodings)
     return decoded
@@ -285,7 +267,7 @@ def handle_encoding(
     encodings: list = ['utf-8', 'windows-1251', 'koi8-r']
 ) -> tuple[str, str]:
     """
-    Обрабатывает различные кодировки и возвращает декодированный текст и найденную кодировку.
+    Декодирование текста с возвратом найденной кодировки
     
     Args:
         text: Текст для декодирования (строка или байты)
@@ -299,7 +281,7 @@ def handle_encoding(
 
 def timing_decorator(func: Callable) -> Callable:
     """
-    Декоратор для измерения времени выполнения функции.
+    Декоратор для измерения времени выполнения функции
     
     Args:
         func: Функция для обертки

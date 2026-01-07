@@ -3,27 +3,23 @@ Rules Engine Module
 Эвристические правила и формирование risk score
 """
 
-# Константы для правил
-RECEIVED_HOPS_THRESHOLD = 10
-
 # Опасные расширения файлов
 DANGEROUS_EXTENSIONS = {
     '.exe', '.scr', '.bat', '.cmd', '.com', '.pif', '.vbs', '.js',
     '.jar', '.app', '.deb', '.pkg', '.dmg', '.msi', '.dll', '.lnk',
-    '.hta', '.wsf', '.ps1', '.sh', '.run', '.bin'
+    '.hta', '.wsf', '.ps1', '.sh', '.run', '.bin', '.rar', '.7z', '.zip'
 }
 
 # Веса правил
 RULE_WEIGHTS = {
-    'spf_fail': 10,
-    'dkim_fail': 10,
-    'dmarc_fail': 10,
-    'domain_mismatch': 10,
-    'domain_in_ti_db': 35,
-    'ip_in_ti_db': 35,
-    'reply_anomaly': 10,
-    'received_hops_anomaly': 15,
-    'dangerous_attachments': 20,
+    'spf_fail': 20,
+    'dkim_fail': 20,
+    'dmarc_fail': 20,
+    'domain_mismatch': 30,
+    'domain_in_ti_db': 60,
+    'ip_in_ti_db': 60,
+    'reply_anomaly': 30,
+    'dangerous_attachments': 40,
 }
 
 
@@ -183,32 +179,6 @@ def check_reply_anomaly(header_analysis: dict) -> dict:
     }
 
 
-def check_received_hops_anomaly(header_analysis: dict) -> dict:
-    """
-    Проверка аномально большого количества хопов в заголовках Received
-    
-    Args:
-        header_analysis: результат analyze_headers() из header_analyzer
-        
-    Returns:
-        dict: результат проверки
-    """
-    received_count = header_analysis.get('received_count', 0)
-    
-    if received_count > RECEIVED_HOPS_THRESHOLD:
-        return {
-            'triggered': True,
-            'score': RULE_WEIGHTS['received_hops_anomaly'],
-            'details': f'Anomalous number of Received hops: {received_count} (threshold: {RECEIVED_HOPS_THRESHOLD})'
-        }
-    
-    return {
-        'triggered': False,
-        'score': 0,
-        'details': f'Received hops count: {received_count} (normal)'
-    }
-
-
 def check_dangerous_attachments(parsed_email: dict) -> dict:
     """
     Проверка наличия вложений с опасными расширениями
@@ -253,7 +223,7 @@ def calculate_risk_score(triggered_rules: list) -> int:
     Формирование risk score (0-100) на основе сработавших правил с весовыми коэффициентами
     
     Args:
-        triggered_rules: список сработавших правил с их весами (список словарей с ключами 'rule_name' и 'weight')
+        triggered_rules: список сработавших правил с их весами
         
     Returns:
         int: risk score (0-100)
@@ -280,11 +250,11 @@ def classify_risk_level(risk_score: int) -> str:
         risk_score: риск-скор (0-100)
         
     Returns:
-        str: 'LOW' (<30), 'MEDIUM' (30-70), 'HIGH' (>70)
+        str: 'LOW' (<30), 'MEDIUM' (30-69), 'HIGH' (>=70)
     """
     if risk_score < 30:
         return 'LOW'
-    elif risk_score <= 70:
+    elif risk_score <= 69:
         return 'MEDIUM'
     else:
         return 'HIGH'
@@ -302,19 +272,12 @@ def evaluate_all_rules(header_analysis: dict, parsed_email: dict,
         
     Returns:
         dict: {
-            'risk_score': int,              # 0-100
-            'risk_level': str,              # 'LOW'/'MEDIUM'/'HIGH'
-            'triggered_rules': [
-                {
-                    'rule_name': str,
-                    'weight': int,
-                    'description': str
-                }
-            ],
+            'risk_score': int,
+            'risk_level': str,
+            'triggered_rules': list,
             'rule_details': dict
         }
     """
-    # Валидация входных данных
     if not isinstance(header_analysis, dict):
         header_analysis = {}
     if not isinstance(parsed_email, dict):
@@ -325,7 +288,7 @@ def evaluate_all_rules(header_analysis: dict, parsed_email: dict,
     triggered_rules = []
     rule_details = {}
     
-    # 1. Authentication (SPF/DKIM/DMARC)
+    # Аутентификация
     auth_result = check_authentication(header_analysis)
     if auth_result['triggered']:
         triggered_rules.append({
@@ -335,7 +298,7 @@ def evaluate_all_rules(header_analysis: dict, parsed_email: dict,
         })
     rule_details['authentication'] = auth_result
     
-    # 2. Domain mismatch (From/Reply-To/Return-Path)
+    # Несоответствие доменов
     domain_result = check_domain_mismatch(header_analysis)
     if domain_result['triggered']:
         triggered_rules.append({
@@ -345,7 +308,7 @@ def evaluate_all_rules(header_analysis: dict, parsed_email: dict,
         })
     rule_details['domain_mismatch'] = domain_result
     
-    # 3. Reply anomaly ("Re:" без References)
+    # Аномалия ответа
     reply_result = check_reply_anomaly(header_analysis)
     if reply_result['triggered']:
         triggered_rules.append({
@@ -355,17 +318,7 @@ def evaluate_all_rules(header_analysis: dict, parsed_email: dict,
         })
     rule_details['reply_anomaly'] = reply_result
     
-    # 4. Received: аномально большое кол-во хопов
-    hops_result = check_received_hops_anomaly(header_analysis)
-    if hops_result['triggered']:
-        triggered_rules.append({
-            'rule_name': 'received_hops_anomaly',
-            'weight': hops_result['score'],
-            'description': hops_result['details']
-        })
-    rule_details['received_hops_anomaly'] = hops_result
-    
-    # 5. TI reputation (domains/IPs)
+    # Репутация TI
     ti_result = check_threat_intelligence(ti_results)
     if ti_result['triggered']:
         triggered_rules.append({
@@ -375,7 +328,7 @@ def evaluate_all_rules(header_analysis: dict, parsed_email: dict,
         })
     rule_details['threat_intelligence'] = ti_result
     
-    # 6. Dangerous attachments
+    # Опасные вложения
     attachments_result = check_dangerous_attachments(parsed_email)
     if attachments_result['triggered']:
         triggered_rules.append({
@@ -385,7 +338,7 @@ def evaluate_all_rules(header_analysis: dict, parsed_email: dict,
         })
     rule_details['dangerous_attachments'] = attachments_result
     
-    # Calculate risk score
+    # Расчет risk score
     risk_score = calculate_risk_score(triggered_rules)
     risk_level = classify_risk_level(risk_score)
     

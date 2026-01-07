@@ -1,0 +1,19 @@
+{
+  "tfidf_dim": 4959,
+  "synthetic_dim": 10,
+  "total_dim": 4969,
+  "concat_order": "tfidf_then_synthetic",
+  "synthetic_feature_names": [
+    "url_count",
+    "attachment_count",
+    "ip_count",
+    "subject_length",
+    "body_length",
+    "has_url_shortener",
+    "has_long_domain",
+    "has_suspicious_tld",
+    "has_ip_in_url",
+    "urgency_markers_count"
+  ],
+  "dtype": "float32"
+}

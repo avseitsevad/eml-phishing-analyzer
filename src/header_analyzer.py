@@ -8,7 +8,7 @@ from typing import Dict, Any
 
 from .utils import EMAIL_DOMAIN_PATTERN
 
-# Компилированные регулярные выражения для парсинга Authentication-Results
+# Регулярные выражения для парсинга Authentication-Results
 SPF_PATTERN = re.compile(r'spf=(\w+)', re.IGNORECASE)
 DKIM_PATTERN = re.compile(r'dkim=(\w+)', re.IGNORECASE)
 DMARC_PATTERN = re.compile(r'dmarc=(\w+)', re.IGNORECASE)
@@ -20,7 +20,7 @@ def extract_domain(address: str) -> str:
     Извлечение домена из email адреса
     
     Args:
-        address: email адрес (например, "user@example.com" или "Name <user@example.com>")
+        address: email адрес
         
     Returns:
         str: домен или пустая строка
@@ -96,22 +96,17 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
     """
     Главная функция анализа заголовков
     
-    Извлекает факты из заголовков email для использования в эвристических правилах.
-    НЕ принимает решений, НЕ считает баллы, НЕ формирует вердикты. Только извлекает факты.
-    
     Args:
-        headers: словарь с полями заголовков из email_parser.parse_email() 
+        headers: словарь с полями заголовков из email_parser.parse_email()
         
     Returns:
-        dict: плоский словарь с извлеченными фактами:
-        {
-            'spf_result': str,              # 'pass'/'fail'/'none'
-            'dkim_result': str,             # 'pass'/'fail'/'none'
-            'dmarc_result': str,            # 'pass'/'fail'/'none'
+        dict: {
+            'spf_result': str,
+            'dkim_result': str,
+            'dmarc_result': str,
             'from_domain': str,
             'reply_to_domain': str,
             'return_path_domain': str,
-            'received_count': int,
             'has_re_without_references': bool
         }
     """
@@ -122,7 +117,6 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
         'from_domain': '',
         'reply_to_domain': '',
         'return_path_domain': '',
-        'received_count': 0,
         'has_re_without_references': False
     }
     
@@ -141,13 +135,6 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
     result['from_domain'] = extract_domain(from_addr)
     result['reply_to_domain'] = extract_domain(reply_to) if reply_to else ''
     result['return_path_domain'] = extract_domain(return_path) if return_path else ''
-    
-    # email_parser.parse_email() возвращает 'received_headers' (список)
-    received_headers = headers.get('received_headers', [])
-    if not isinstance(received_headers, list):
-        received_headers = []
-    
-    result['received_count'] = len(received_headers)
     
     # Проверка структурной аномалии: "Re:" в Subject при отсутствии References
     subject = headers.get('subject', '')

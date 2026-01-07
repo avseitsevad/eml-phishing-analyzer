@@ -4,7 +4,6 @@ Feature Extractor Module
 """
 
 import re
-import logging
 import pickle
 from pathlib import Path
 from typing import Dict, Any, Tuple, List, Optional
@@ -13,6 +12,7 @@ import tldextract
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 from sklearn.preprocessing import MinMaxScaler
 import nltk
 from nltk.tokenize import word_tokenize
@@ -21,8 +21,6 @@ from nltk.corpus import stopwords
 from bs4 import BeautifulSoup
 
 from .utils import IP_PATTERN, extract_hostname_from_url
-
-logger = logging.getLogger(__name__)
 
 # Инициализация NLTK компонентов
 for resource in ['tokenizers/punkt', 'corpora/stopwords', 'corpora/wordnet']:
@@ -38,9 +36,15 @@ STOP_WORDS = set(stopwords.words('english'))
 DATASET_ARTIFACTS = {
     'jose',      # Имя из тестовых данных Nazario
     'enron',     # Название компании из Enron датасета
-    'ect',       # Сокращение из Enron датасета (может быть "etc" с опечаткой)
+    'ect',       # Сокращение из Enron датасета 
     'monkey',    # Часть домена monkey.org из тестовых данных
-    'org'        # Часть доменов .org (фильтруется только как отдельное слово)
+    'org',       # Часть доменов .org (фильтруется только как отдельное слово)
+    'nazario',
+    'corp',
+    'houston',
+    'usaa',
+    'dow',
+    'jones'        
 }
 
 # Объединяем стоп-слова и артефакты датасета
@@ -73,21 +77,26 @@ class FeatureExtractor:
     Хранит обученный TfidfVectorizer для консистентной трансформации
     """
     
-    def __init__(self, max_features: int = 5000):
+    def __init__(self, max_features: int = 3000):
         """
-        Инициализация экстрактора признаков
-        
         Args:
             max_features: максимальное количество признаков TF-IDF
         """
         self.tfidf_vectorizer = TfidfVectorizer(
             max_features=max_features,
-            ngram_range=(1, 2),  # Униграммы и биграммы
-            min_df=2,  # Минимальная частота документа
-            max_df=0.95,  # Максимальная частота документа
+            ngram_range=(1, 2),
+            min_df=3,
+            max_df=0.3,
             lowercase=True,
-            strip_accents='unicode'
+            strip_accents='unicode',
+            token_pattern=r'\b[a-z]{3,}\b',
+            sublinear_tf=True,
+            stop_words='english',  
+            use_idf=True,
+            smooth_idf=True,
+            norm='l2'
         )
+
         self.synthetic_scaler = MinMaxScaler()
         self.is_fitted = False
         self.is_scaler_fitted = False
@@ -132,13 +141,8 @@ class FeatureExtractor:
     @staticmethod
     def prepare_text_from_parsed_email(parsed_email: dict) -> str:
         """
-        Подготовка текста из распарсенного письма для векторизации:
-        - Очистка HTML тегов из body_html и body_plain (если содержит HTML)
-        - Объединение subject и body
+        Подготовка текста из распарсенного письма для векторизации
         
-        Args:
-            parsed_email: результат email_parser.parse_email()
-            
         Returns:
             str: объединенный очищенный текст (subject + body)
         """
@@ -146,20 +150,12 @@ class FeatureExtractor:
         body_plain = parsed_email.get('body_plain', '') or ''
         body_html = parsed_email.get('body_html', '') or ''
         
-        # Объединяем body_plain и body_html (если оба есть)
-        body_combined = ''
-        if body_plain and body_html:
-            # Если есть оба, объединяем их
-            body_combined = f"{body_plain} {body_html}"
-        elif body_plain:
-            body_combined = body_plain
-        elif body_html:
-            body_combined = body_html
+        # Приоритет: body_plain > body_html (избегаем дублирования)
+        body = body_plain if body_plain else body_html
         
-        # ВСЕГДА очищаем HTML теги, даже если был body_plain
-        # (body_plain может содержать HTML теги в некоторых случаях)
-        if body_combined:
-            body_clean = FeatureExtractor.strip_html_tags(body_combined)
+        # Очистка HTML тегов (если есть)
+        if body:
+            body_clean = FeatureExtractor.strip_html_tags(body)
         else:
             body_clean = ''
         
@@ -231,61 +227,47 @@ class FeatureExtractor:
             tld = f".{parts[-1]}" if len(parts) > 1 else ""
         return tld.lower() in SUSPICIOUS_TLDS
     
-    def extract_quantitative_features(self, parsed_email: dict) -> Tuple[np.ndarray, np.ndarray]:
+    def extract_quantitative_features(self, parsed_email: dict) -> np.ndarray:
         """
         Извлечение количественных метрик: counts URL/attachments/IPs
-        IP извлекаются только из URL в теле письма (только из текста)
-        Применяется логарифмическая нормализация (log1p) для совместимости с TF-IDF векторами
-        
-        Args:
-            parsed_email: результат email_parser.parse_email()
         
         Returns:
-            tuple: (normalized_features, raw_features)
+            np.ndarray: raw features (без нормализации)
         """
         urls = parsed_email.get('urls', []) or []
         url_count = len(urls)
         attachment_count = len(parsed_email.get('attachments', []))
-        # IP извлекаются только из URL в теле письма
         ips_from_urls = self._extract_ips_from_urls(urls)
         ip_count = len(ips_from_urls)
         
-        raw_features = np.array([url_count, attachment_count, ip_count], dtype=np.float32)
-        # Логарифмическая нормализация: log(1 + x)
-        normalized_features = np.log1p(raw_features)
-        return normalized_features, raw_features
+        return np.array([url_count, attachment_count, ip_count], dtype=np.float32)
+
     
-    def extract_structural_features(self, parsed_email: dict) -> Tuple[np.ndarray, np.ndarray]:
+    def extract_structural_features(self, parsed_email: dict) -> np.ndarray:
         """
         Извлечение структурных характеристик: length Subject/body
-        Применяется логарифмическая нормализация (log1p)
-        
-        Args:
-            parsed_email: результат email_parser.parse_email()
         
         Returns:
-            tuple: (normalized_features, raw_features)
+            np.ndarray: raw features (без нормализации)
         """
         subject = parsed_email.get('subject', '') or ''
         body_plain = parsed_email.get('body_plain', '') or ''
         body_html = parsed_email.get('body_html', '') or ''
         
-        # Используем длину body_plain или body_html (что доступно)
         body_length = len(body_plain) if body_plain else len(body_html)
-        
         subject_len = len(subject)
-        raw_features = np.array([subject_len, body_length], dtype=np.float32)
-        normalized_features = np.log1p(raw_features)
-        return normalized_features, raw_features
+        
+        return np.array([subject_len, body_length], dtype=np.float32)
+
     
     def extract_binary_indicators(self, url_analysis: dict, parsed_email: dict) -> np.ndarray:
         """
-        Извлечение бинарных индикаторов
+        Извлечение бинарных индикаторов из тела письма
         has_long_domain и has_suspicious_tld анализируются только из доменов URL в теле письма (только из текста)
         
         Args:
             url_analysis: результат url_domain_analyzer.analyze_urls_and_domains()
-            parsed_email: результат email_parser.parse_email() (для извлечения доменов только из URL)
+            parsed_email: результат email_parser.parse_email()
         
         Returns:
             np.ndarray: [has_url_shortener, has_long_domain, has_suspicious_tld, has_ip_in_url]
@@ -293,14 +275,10 @@ class FeatureExtractor:
         has_url_shortener = 1 if url_analysis.get('has_url_shortener', False) else 0
         has_ip_in_url = 1 if url_analysis.get('has_ip_in_url', False) else 0
         
-        # Домены извлекаются только из URL в теле письма (только из текста)
         urls = parsed_email.get('urls', []) or []
         domains_from_urls = self._extract_domains_from_urls(urls)
         
-        # Проверяем наличие длинных доменов только из URL
         has_long_domain = 1 if any(self._is_long_domain(domain) for domain in domains_from_urls) else 0
-        
-        # Проверяем наличие подозрительных TLD только из URL
         has_suspicious_tld = 1 if any(self._is_suspicious_tld(domain) for domain in domains_from_urls) else 0
         
         return np.array([
@@ -310,81 +288,78 @@ class FeatureExtractor:
             has_ip_in_url
         ], dtype=np.float32)
     
-    def extract_linguistic_features(self, text: str) -> Tuple[np.ndarray, np.ndarray]:
+    def extract_linguistic_features(self, text: str) -> np.ndarray:
         """
         Извлечение лингвистических метрик: urgency keywords
-        Применяется логарифмическая нормализация (log1p)
-        
-        Args:
-            text: переведенный текст письма (на английском)
         
         Returns:
-            tuple: (normalized_features, raw_features)
+            np.ndarray: raw features (без нормализации)
         """
         if not text:
-            raw_features = np.array([0.0], dtype=np.float32)
-            return np.log1p(raw_features), raw_features
+            return np.array([0.0], dtype=np.float32)
         
         text_lower = text.lower()
         urgency_count = sum(
             len(re.findall(r'\b' + re.escape(keyword) + r'\b', text_lower, re.IGNORECASE))
             for keyword in URGENCY_KEYWORDS
         )
-        raw_features = np.array([float(urgency_count)], dtype=np.float32)
-        normalized_features = np.log1p(raw_features)
-        return normalized_features, raw_features
-    
+        return np.array([float(urgency_count)], dtype=np.float32)
+        
     def preprocess_text(self, text: str) -> str:
         """
-        Предобработка текста: очистка HTML, токенизация, лемматизация, удаление стоп-слов
-        и артефактов датасета
+        Предобработка текста для векторизации:
+        очистка HTML, удаление email/URL,
+        токенизация, лемматизация, фильтрация стоп-слов и артефактов
         """
         if not text:
             return ""
         
-        # Дополнительная очистка HTML тегов (на случай, если они все еще есть)
-        # Проверяем наличие HTML тегов
         if '<' in text and '>' in text:
             text = FeatureExtractor.strip_html_tags(text)
         
-        # Заменяем nbsp как подстроку на пробел
+        text = re.sub(
+            r'\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b',
+            ' ',
+            text
+        )
+        
+        text = re.sub(r'https?://\S+', ' ', text)
+        text = re.sub(r'www\.\S+', ' ', text)
+        text = re.sub(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', ' ', text)
+        text = re.sub(r'[^a-zA-Z\s]', ' ', text)
         text = text.replace('nbsp', ' ')
-        text = re.sub(r'\s+', ' ', text)  # множественные пробелы в один
+        text = re.sub(r'\s+', ' ', text).strip()
         
         try:
             tokens = word_tokenize(text.lower())
-        except Exception as e:
-            logger.error(f"Tokenization failed: {e}")
+        except Exception:
             tokens = text.lower().split()
         
         processed_tokens = []
         for token in tokens:
-            if not re.match(r'^[a-zA-Z]+$', token):
+            if not re.match(r'^[a-z]+$', token):
                 continue
+            
             lemmatized = lemmatizer.lemmatize(token)
-            # Фильтруем стоп-слова И артефакты датасета
-            if lemmatized not in ALL_STOP_WORDS and len(lemmatized) > 2:
+            
+            if (lemmatized not in ALL_STOP_WORDS and len(lemmatized) >= 3):
                 processed_tokens.append(lemmatized)
         
         return ' '.join(processed_tokens)
     
     def fit_vectorizer(self, texts: list):
-        """Обучение TF-IDF векторизатора на обучающей выборке"""
+        """Обучение TF-IDF векторизатора"""
         if not texts:
             raise ValueError("Texts list cannot be empty")
         
         processed_texts = [self.preprocess_text(str(text)) for text in texts]
         self.tfidf_vectorizer.fit(processed_texts)
         self.is_fitted = True
-        logger.info(f"TF-IDF vectorizer fitted on {len(texts)} texts, "
-                   f"vocabulary size: {len(self.tfidf_vectorizer.vocabulary_)}")
     
     def fit_scaler(self, synthetic_features_list: list):
         """
-        Обучение MinMaxScaler на синтетических признаках из обучающей выборки
-        
         Args:
-            synthetic_features_list: список массивов синтетических признаков (каждый массив - один образец)
+            synthetic_features_list: список массивов синтетических признаков
         """
         if not synthetic_features_list:
             raise ValueError("Synthetic features list cannot be empty")
@@ -393,16 +368,11 @@ class FeatureExtractor:
         features_matrix = np.array(synthetic_features_list, dtype=np.float32)
         self.synthetic_scaler.fit(features_matrix)
         self.is_scaler_fitted = True
-        logger.info(f"Synthetic features scaler fitted on {len(synthetic_features_list)} samples, "
-                   f"feature count: {features_matrix.shape[1]}")
     
     def vectorize_text(self, text: str) -> np.ndarray:
         """TF-IDF векторизация текста"""
         if not self.is_fitted:
-            raise ValueError("Vectorizer must be fitted before vectorization. Call fit_vectorizer() first.")
-        
-        if not hasattr(self.tfidf_vectorizer, 'vocabulary_') or not self.tfidf_vectorizer.vocabulary_:
-            raise ValueError("Vectorizer vocabulary is empty. Call fit_vectorizer() first.")
+            raise ValueError("Vectorizer must be fitted before vectorization")
         
         processed_text = self.preprocess_text(text or '')
         vector = self.tfidf_vectorizer.transform([processed_text])
@@ -419,62 +389,41 @@ class FeatureExtractor:
         translated_text: str,
         url_analysis: dict
     ) -> Dict[str, Any]:
-        """
-        Главный метод для извлечения всех признаков из письма
+        """Главный метод для извлечения всех признаков из письма"""
         
-        Args:
-            parsed_email: результат email_parser.parse_email() (плоская структура)
-            translated_text: ПЕРЕВЕДЕННЫЙ текст из translation.translate_text() (после prepare_text_from_parsed_email())
-            url_analysis: результат url_domain_analyzer.analyze_urls_and_domains()
-        
-        Returns:
-            dict: {
-                'tfidf_vector': np.ndarray,
-                'synthetic_features': dict,
-                'feature_vector': np.ndarray
-            }
-        """
-        # Извлечение синтетических признаков
-        quantitative_norm, quantitative_raw = self.extract_quantitative_features(parsed_email)
-        structural_norm, structural_raw = self.extract_structural_features(parsed_email)
+        quantitative = self.extract_quantitative_features(parsed_email)
+        structural = self.extract_structural_features(parsed_email)
         binary = self.extract_binary_indicators(url_analysis, parsed_email)
-        linguistic_norm, linguistic_raw = self.extract_linguistic_features(translated_text)
+        linguistic = self.extract_linguistic_features(translated_text)
         
-        # Объединение всех синтетических признаков (после log1p нормализации)
+        # Объединение всех синтетических признаков (raw значения)
         synthetic_features_array = np.concatenate([
-            quantitative_norm, 
-            structural_norm, 
+            quantitative, 
+            structural, 
             binary, 
-            linguistic_norm
+            linguistic
         ])
         
-        # Дополнительная MinMax нормализация синтетических признаков к [0, 1]
-        # для совместимости с TF-IDF векторами
+        # Применяем MinMaxScaler один раз на все синтетические признаки
         if self.is_scaler_fitted:
-            # Преобразуем в 2D для scaler (1 sample, n_features)
             synthetic_features_2d = synthetic_features_array.reshape(1, -1)
             synthetic_features_normalized = self.synthetic_scaler.transform(synthetic_features_2d)
+            # Ограничиваем значения в диапазон [0, 1] на случай выхода за пределы обучающего диапазона
+            synthetic_features_normalized = np.clip(synthetic_features_normalized, 0.0, 1.0)
             synthetic_features_array = synthetic_features_normalized.flatten()
-        else:
-            logger.warning("Scaler not fitted. Synthetic features will not be MinMax normalized. "
-                          "Call fit_scaler() first for proper normalization.")
         
-        # TF-IDF векторизация ПЕРЕВЕДЕННОГО текста
         tfidf_vector = self.vectorize_text(translated_text)
-        
-        # Объединение TF-IDF и синтетических признаков
         feature_vector = self.combine_features(tfidf_vector, synthetic_features_array)
         
-        # Формирование словаря для детализации (исходные значения)
         synthetic_features_dict = {
             'quantitative': {
-                'url_count': int(quantitative_raw[0]),
-                'attachment_count': int(quantitative_raw[1]),
-                'ip_count': int(quantitative_raw[2])
+                'url_count': int(quantitative[0]),
+                'attachment_count': int(quantitative[1]),
+                'ip_count': int(quantitative[2])
             },
             'structural': {
-                'subject_length': int(structural_raw[0]),
-                'body_length': int(structural_raw[1])
+                'subject_length': int(structural[0]),
+                'body_length': int(structural[1])
             },
             'binary': {
                 'has_url_shortener': int(binary[0]),
@@ -483,7 +432,7 @@ class FeatureExtractor:
                 'has_ip_in_url': int(binary[3])
             },
             'linguistic': {
-                'urgency_markers_count': int(linguistic_raw[0])
+                'urgency_markers_count': int(linguistic[0])
             }
         }
         
@@ -507,7 +456,6 @@ class FeatureExtractor:
                 'scaler': self.synthetic_scaler,
                 'is_scaler_fitted': self.is_scaler_fitted
             }, f)
-        logger.info(f"Vectorizer and scaler saved to {path}")
     
     def load_vectorizer(self, path: str):
         """Загрузка обученного TfidfVectorizer и MinMaxScaler"""
@@ -525,8 +473,3 @@ class FeatureExtractor:
             else:
                 self.synthetic_scaler = MinMaxScaler()
                 self.is_scaler_fitted = False
-                logger.warning("Scaler not found in saved file. New scaler created. Call fit_scaler() to train it.")
-        
-        vocab_size = len(self.tfidf_vectorizer.vocabulary_) if hasattr(self.tfidf_vectorizer, 'vocabulary_') else 0
-        logger.info(f"Vectorizer loaded from {path}, vocabulary size: {vocab_size}, "
-                   f"scaler fitted: {self.is_scaler_fitted}")

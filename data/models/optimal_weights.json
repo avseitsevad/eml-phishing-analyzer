@@ -1,0 +1,6 @@
+{
+  "model_name": "Logistic Regression",
+  "w_ml": 0.7,
+  "w_rules": 0.30000000000000004,
+  "threshold": 0.5000000000000001
+}
