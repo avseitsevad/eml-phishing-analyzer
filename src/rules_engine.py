@@ -15,7 +15,7 @@ RULE_WEIGHTS = {
     'spf_fail': 20,
     'dkim_fail': 20,
     'dmarc_fail': 20,
-    'domain_mismatch': 30,
+    'domain_mismatch': 10,
     'domain_in_ti_db': 60,
     'ip_in_ti_db': 60,
     'reply_anomaly': 30,
@@ -79,29 +79,20 @@ def check_domain_mismatch(header_analysis: dict) -> dict:
     Returns:
         dict: результат проверки
     """
-    from_domain = header_analysis.get('from_domain', '')
-    reply_to_domain = header_analysis.get('reply_to_domain', '')
-    return_path_domain = header_analysis.get('return_path_domain', '')
+    has_mismatch = header_analysis.get('has_domain_mismatch', False)
+    details = header_analysis.get('domain_mismatch_details', 'All domains match')
     
-    mismatches = []
-    
-    if from_domain and reply_to_domain and from_domain != reply_to_domain:
-        mismatches.append(f"Reply-To: {reply_to_domain}")
-    
-    if from_domain and return_path_domain and from_domain != return_path_domain:
-        mismatches.append(f"Return-Path: {return_path_domain}")
-    
-    if mismatches:
+    if has_mismatch:
         return {
             'triggered': True,
             'score': RULE_WEIGHTS['domain_mismatch'],
-            'details': f'From: {from_domain} != {", ".join(mismatches)}'
+            'details': details
         }
     
     return {
         'triggered': False,
         'score': 0,
-        'details': 'All domains match'
+        'details': details
     }
 
 

@@ -46,6 +46,11 @@ def download_feed(url: str, output_filename: str, download_dir: Optional[str] = 
     download_dir.mkdir(parents=True, exist_ok=True)
     output_file = download_dir / output_filename
     
+    # Если файл уже существует, возвращаем путь к нему
+    if output_file.exists():
+        logger.info(f"Фид уже существует: {output_file}")
+        return str(output_file)
+    
     logger.info(f"Загрузка фида из {url}")
     response = requests.get(url, timeout=DOWNLOAD_TIMEOUT, stream=True)
     response.raise_for_status()
@@ -201,6 +206,9 @@ def update_from_urlhaus(ti_instance: ThreatIntelligence, csv_path: str):
         f"пропущено {skipped_count:,}"
     )
     
+    # Обновляем дату последнего обновления
+    ti_instance.update_last_update_date()
+    
     ti_instance.cache.clear()
 
 
@@ -257,6 +265,9 @@ def update_from_openphish(ti_instance: ThreatIntelligence, feed_path: str):
         f"импортировано {imported_count:,}, пропущено {skipped_count:,}"
     )
     
+    # Обновляем дату последнего обновления
+    ti_instance.update_last_update_date()
+    
     ti_instance.cache.clear()
 
 
@@ -277,7 +288,7 @@ def main():
   python scripts/update_threat_intel.py --openphish --openphish-file path/to/openphish.txt
   
   # Указать путь к БД
-  python scripts/update_threat_intel.py --urlhaus --db-path custom/path/ti.db
+  python scripts/update_threat_intel.py --urlhaus --db-path custom/path/ti_database.db
         """
     )
     
@@ -299,7 +310,7 @@ def main():
     
     # Определяем путь к БД
     db_path = Path(args.db_path) if args.db_path else \
-              Path(__file__).parent.parent / "data" / "threat_intelligence" / "ti.db"
+              Path(__file__).parent.parent / "data" / "threat_intelligence" / "ti_database.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     
     logger.info(f"Используется база данных: {db_path}")

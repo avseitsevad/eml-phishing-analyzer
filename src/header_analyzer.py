@@ -5,6 +5,7 @@ Header Analyzer Module
 
 import re
 from typing import Dict, Any
+import tldextract
 
 from .utils import EMAIL_DOMAIN_PATTERN
 
@@ -71,6 +72,68 @@ def parse_authentication_results(auth_results: str) -> Dict[str, str]:
     return result
 
 
+def _extract_tld_sld(domain: str) -> str:
+    """
+    Извлечение TLD+SLD из домена для сравнения
+    
+    Args:
+        domain: полный домен
+        
+    Returns:
+        str: TLD+SLD или пустая строка
+    """
+    if not domain:
+        return ''
+    
+    extracted = tldextract.extract(domain.lower())
+    if extracted.domain and extracted.suffix:
+        return f"{extracted.domain}.{extracted.suffix}"
+    return ''
+
+
+def check_domain_mismatch(from_domain: str, reply_to_domain: str, 
+                         return_path_domain: str) -> Dict[str, Any]:
+    """
+    Проверка сопоставления доменов From/Reply-To/Return-Path
+    Сравнивает только TLD+SLD
+    
+    Args:
+        from_domain: домен из заголовка From
+        reply_to_domain: домен из заголовка Reply-To
+        return_path_domain: домен из заголовка Return-Path
+        
+    Returns:
+        dict: {
+            'has_domain_mismatch': bool,
+            'details': str
+        }
+    """
+    # Извлекаем TLD+SLD для сравнения
+    from_tld_sld = _extract_tld_sld(from_domain)
+    reply_to_tld_sld = _extract_tld_sld(reply_to_domain)
+    return_path_tld_sld = _extract_tld_sld(return_path_domain)
+    
+    mismatches = []
+    
+    # Сравниваем TLD+SLD, а не полные домены
+    if from_tld_sld and reply_to_tld_sld and from_tld_sld != reply_to_tld_sld:
+        mismatches.append(f"Reply-To: {reply_to_domain} ({reply_to_tld_sld})")
+    
+    if from_tld_sld and return_path_tld_sld and from_tld_sld != return_path_tld_sld:
+        mismatches.append(f"Return-Path: {return_path_domain} ({return_path_tld_sld})")
+    
+    if mismatches:
+        return {
+            'has_domain_mismatch': True,
+            'details': f'From: {from_domain} ({from_tld_sld}) != {", ".join(mismatches)}'
+        }
+    
+    return {
+        'has_domain_mismatch': False,
+        'details': 'All domains match'
+    }
+
+
 def check_reply_without_references(subject: str, references: str) -> bool:
     """
     Проверка структурной аномалии: наличие "Re:" в Subject при отсутствии References
@@ -107,7 +170,9 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
             'from_domain': str,
             'reply_to_domain': str,
             'return_path_domain': str,
-            'has_re_without_references': bool
+            'has_re_without_references': bool,
+            'has_domain_mismatch': bool,
+            'domain_mismatch_details': str
         }
     """
     result = {
@@ -117,7 +182,9 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
         'from_domain': '',
         'reply_to_domain': '',
         'return_path_domain': '',
-        'has_re_without_references': False
+        'has_re_without_references': False,
+        'has_domain_mismatch': False,
+        'domain_mismatch_details': ''
     }
     
     # Парсинг Authentication-Results
@@ -135,6 +202,15 @@ def analyze_headers(headers: Dict[str, Any]) -> Dict[str, Any]:
     result['from_domain'] = extract_domain(from_addr)
     result['reply_to_domain'] = extract_domain(reply_to) if reply_to else ''
     result['return_path_domain'] = extract_domain(return_path) if return_path else ''
+    
+    # Проверка несоответствия доменов
+    domain_mismatch_result = check_domain_mismatch(
+        result['from_domain'],
+        result['reply_to_domain'],
+        result['return_path_domain']
+    )
+    result['has_domain_mismatch'] = domain_mismatch_result['has_domain_mismatch']
+    result['domain_mismatch_details'] = domain_mismatch_result['details']
     
     # Проверка структурной аномалии: "Re:" в Subject при отсутствии References
     subject = headers.get('subject', '')

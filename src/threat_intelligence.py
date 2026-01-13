@@ -7,6 +7,7 @@ import sqlite3
 from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, Optional, List, Any
+from datetime import datetime
 
 from .utils import normalize_domain_for_ti
 
@@ -71,6 +72,25 @@ class ThreatIntelligence:
         cursor.execute("""
             CREATE INDEX IF NOT EXISTS idx_ip ON malicious_ips(ip)
         """)
+        
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT
+            )
+        """)
+        
+        # Инициализация даты последнего обновления, если её нет
+        cursor.execute("""
+            SELECT value FROM metadata WHERE key = 'last_update_date'
+        """)
+        if not cursor.fetchone():
+            current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute("""
+                INSERT INTO metadata (key, value, updated_at)
+                VALUES ('last_update_date', ?, ?)
+            """, (current_date, current_date))
         
         self.conn.commit()
     
@@ -305,6 +325,45 @@ class ThreatIntelligence:
     def clear_cache(self):
         """Очистка кэша результатов"""
         self.cache.clear()
+    
+    def get_last_update_date(self) -> Optional[str]:
+        """
+        Получение даты последнего обновления баз
+        
+        Returns:
+            str: дата в формате 'YYYY-MM-DD HH:MM:SS' или None
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT value FROM metadata WHERE key = 'last_update_date'
+            """)
+            result = cursor.fetchone()
+            if result:
+                return result['value']
+            return None
+        except sqlite3.Error:
+            return None
+    
+    def update_last_update_date(self, date: Optional[str] = None):
+        """
+        Обновление даты последнего обновления баз
+        
+        Args:
+            date: дата в формате 'YYYY-MM-DD HH:MM:SS'. Если не указана, используется текущая дата
+        """
+        try:
+            if date is None:
+                date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO metadata (key, value, updated_at)
+                VALUES ('last_update_date', ?, ?)
+            """, (date, date))
+            self.conn.commit()
+        except sqlite3.Error:
+            pass
     
     def close(self):
         """Закрытие подключения к базе данных"""

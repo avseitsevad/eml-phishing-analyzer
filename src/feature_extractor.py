@@ -5,6 +5,7 @@ Feature Extractor Module
 
 import re
 import pickle
+import warnings
 from pathlib import Path
 from typing import Dict, Any, Tuple, List, Optional
 from urllib.parse import urlparse
@@ -19,6 +20,7 @@ from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
 from bs4 import BeautifulSoup
+from bs4 import MarkupResemblesLocatorWarning
 
 from .utils import IP_PATTERN, extract_hostname_from_url
 
@@ -119,7 +121,9 @@ class FeatureExtractor:
         html_text = html_text.replace('nbsp', ' ')
         
         try:
-            soup = BeautifulSoup(html_text, 'html.parser')
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', category=MarkupResemblesLocatorWarning)
+                soup = BeautifulSoup(html_text, 'html.parser')
             # Удаляем script и style блоки
             for script in soup(["script", "style"]):
                 script.decompose()
