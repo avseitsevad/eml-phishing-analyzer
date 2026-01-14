@@ -17,3 +17,4 @@ TESTS/
 *.log
 *.txt
 notebooks/module_testing.ipynb
+scripts/__pycache__/update_threat_intel.cpython-312.pyc

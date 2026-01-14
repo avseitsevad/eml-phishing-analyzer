@@ -292,13 +292,15 @@ def display_parsed_email_details(parsed_email: Dict[str, Any], detected_language
     with col1:
         for field in ['from', 'to', 'subject', 'date']:
             st.write(f"**{field.capitalize() if field != 'from' else 'From'}{':' if field != 'from' else ':'}**")
-            st.text(parsed_email.get(field, '—'))
+            value = parsed_email.get(field, '') or '—'
+            st.text(value)
     
     with col2:
         for field, label in [('reply_to', 'Reply-To'), ('return_path', 'Return-Path'), 
                             ('message_id', 'Message-ID'), ('references', 'References')]:
             st.write(f"**{label}:**")
-            st.text(parsed_email.get(field, '—'))
+            value = parsed_email.get(field, '') or '—'
+            st.text(value)
     
     # Authentication-Results
     auth_results = parsed_email.get('auth_results', '')
@@ -415,14 +417,14 @@ def export_report_json(results: Dict[str, Any]) -> str:
             "ml_phishing_probability": round(ml_result.get('phishing_probability', 0), 4)
         },
         "email_info": {
-            "from": parsed_email.get('from', '—'),
-            "to": parsed_email.get('to', '—'),
-            "subject": parsed_email.get('subject', '—'),
-            "date": parsed_email.get('date', '—'),
-            "reply_to": parsed_email.get('reply_to', '—'),
-            "return_path": parsed_email.get('return_path', '—'),
-            "message_id": parsed_email.get('message_id', '—'),
-            "references": parsed_email.get('references', '—')
+            "from": parsed_email.get('from', '') or '—',
+            "to": parsed_email.get('to', '') or '—',
+            "subject": parsed_email.get('subject', '') or '—',
+            "date": parsed_email.get('date', '') or '—',
+            "reply_to": parsed_email.get('reply_to', '') or '—',
+            "return_path": parsed_email.get('return_path', '') or '—',
+            "message_id": parsed_email.get('message_id', '') or '—',
+            "references": parsed_email.get('references', '') or '—'
         },
         "authentication": {
             "spf": header_analysis.get('spf_result', 'none'),
@@ -589,7 +591,8 @@ def export_report_pdf(results: Dict[str, Any]) -> bytes:
     story.append(Paragraph("ИНФОРМАЦИЯ О ПИСЬМЕ", heading_style))
     
     def _format_field(value):
-        return _soft_wrap_long_token(_escape_xml(parsed_email.get(value, '—')), 50 if value != 'subject' else 60)
+        field_value = parsed_email.get(value, '') or '—'
+        return _soft_wrap_long_token(_escape_xml(field_value), 50 if value != 'subject' else 60)
     
     story.append(Paragraph(f"<b>От:</b> {_format_field('from')}", normal_style))
     story.append(Paragraph(f"<b>Кому:</b> {_format_field('to')}", normal_style))
@@ -598,9 +601,8 @@ def export_report_pdf(results: Dict[str, Any]) -> bytes:
     
     for field, label in [('reply_to', 'Reply-To'), ('return_path', 'Return-Path'), 
                          ('message_id', 'Message-ID'), ('references', 'References')]:
-        val = parsed_email.get(field, '—')
-        if val != '—':
-            story.append(Paragraph(f"<b>{label}:</b> {_soft_wrap_long_token(_escape_xml(val), 50)}", normal_style))
+        val = parsed_email.get(field, '') or '—'
+        story.append(Paragraph(f"<b>{label}:</b> {_soft_wrap_long_token(_escape_xml(val), 50)}", normal_style))
     
     story.append(Spacer(1, 0.12*inch))
     
