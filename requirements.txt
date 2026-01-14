@@ -2,7 +2,6 @@ numpy==1.26.2
 pandas==2.1.4
 scikit-learn==1.6.1
 xgboost==2.0.3
-eml-parser==1.17.4
 beautifulsoup4==4.12.2
 urlextract==1.9.0
 tldextract==5.3.0

@@ -52,24 +52,28 @@ def download_feed(url: str, output_filename: str, download_dir: Optional[str] = 
         return str(output_file)
     
     logger.info(f"Загрузка фида из {url}")
-    response = requests.get(url, timeout=DOWNLOAD_TIMEOUT, stream=True)
-    response.raise_for_status()
-    
-    total_size = int(response.headers.get('content-length', 0))
-    downloaded = 0
-    
-    with open(output_file, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
-            if chunk:
-                f.write(chunk)
-                downloaded += len(chunk)
-                if total_size > 0:
-                    percent = (downloaded / total_size) * 100
-                    print(f"\rПрогресс: {percent:.1f}%", end='', flush=True)
-    
-    print()
-    logger.info(f"Фид загружен: {output_file} ({downloaded:,} байт)")
-    return str(output_file)
+    try:
+        response = requests.get(url, timeout=DOWNLOAD_TIMEOUT, stream=True)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded = 0
+        
+        with open(output_file, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=CHUNK_SIZE):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        percent = (downloaded / total_size) * 100
+                        print(f"\rПрогресс: {percent:.1f}%", end='', flush=True)
+        
+        print()
+        logger.info(f"Фид загружен: {output_file} ({downloaded:,} байт)")
+        return str(output_file)
+    except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+        logger.warning(f"Не удалось загрузить фид из {url}: {e}")
+        return None
 
 
 def download_urlhaus_feed(download_dir: Optional[str] = None) -> Optional[str]:

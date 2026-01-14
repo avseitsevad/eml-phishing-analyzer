@@ -62,9 +62,9 @@ def format_verdict_color(final_score: float, threshold: float) -> tuple:
         Returns:
         tuple: (уровень риска, цвет)
     """
-    if final_score < threshold:
+    if final_score < 0.30:
         return ("LOW", "#28a745")  # зеленый
-    elif final_score < 0.7:
+    elif final_score < 0.69:
         return ("MEDIUM", "#ff9800")  # оранжевый
     else:
         return ("HIGH", "#dc3545")  # красный
